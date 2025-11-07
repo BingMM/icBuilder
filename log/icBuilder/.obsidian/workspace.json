@@ -34,25 +34,23 @@
               "icon": "lucide-file",
               "title": "2025_11_05"
             }
-          }
-        ],
-        "currentTab": 1
-      },
-      {
-        "id": "63344da53b520b69",
-        "type": "tabs",
-        "children": [
+          },
           {
-            "id": "a8e9beb7571e07d1",
+            "id": "df204ede9c41cf8c",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "type": "markdown",
+              "state": {
+                "file": "2025_11_07.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "2025_11_07"
             }
           }
-        ]
+        ],
+        "currentTab": 2
       }
     ],
     "direction": "vertical"
@@ -200,10 +198,23 @@
       "bases:Create new base": false
     }
   },
-  "active": "45fdf706b8422dc6",
+  "active": "df204ede9c41cf8c",
   "lastOpenFiles": [
-    "Overview.md",
+    "Pasted image 20251107132820.png",
+    "Pasted image 20251107132813.png",
+    "Pasted image 20251107132808.png",
+    "Pasted image 20251107132801.png",
+    "Pasted image 20251107132754.png",
+    "Pasted image 20251107132748.png",
+    "Pasted image 20251107132739.png",
+    "Pasted image 20251107132735.png",
+    "Pasted image 20251107132730.png",
+    "Pasted image 20251107131714.png",
+    "Pasted image 20251107131736.png",
+    "2025_11_07.md",
+    "2025_11_06.md",
     "2025_11_05.md",
+    "Overview.md",
     "Welcome.md"
   ]
 }
