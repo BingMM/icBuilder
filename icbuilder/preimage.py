@@ -1,7 +1,7 @@
 #%% Imports
 
 import numpy as np
-from scipy.io.netcdf import NetCDFFile
+from netCDF4 import Dataset
 from typing import Union, Optional
 from numpy.typing import NDArray
 from secsy import CSgrid
@@ -43,7 +43,7 @@ class PreImage:
     """
 
     def __init__(self,
-                 ncdf: NetCDFFile,
+                 ncdf: Dataset,
                  index: Optional[Union[list[int], NDArray[np.int_]]] = None):
         """
         Load orbit file data (e.g., WIC/SI13/SI12) from a NetCDF file.
@@ -65,7 +65,7 @@ class PreImage:
 
         self.shape = self.mlat.shape
 
-    def get_shimg(self, i: int) -> NDArray[np.float_]:
+    def get_shimg(self, i: int) -> NDArray[np.float64]:
         """
         Return the SH corrected image for frame i.
 
@@ -81,7 +81,7 @@ class PreImage:
         """
         return self.shimg[i, :, :]
 
-    def get_dgimg(self, i: int) -> NDArray[np.float_]:
+    def get_dgimg(self, i: int) -> NDArray[np.float64]:
         """
         Return the dayglow subtracted image for frame i.
 
@@ -97,7 +97,7 @@ class PreImage:
         """
         return self.dgimg[i, :, :]
     
-    def get_dgw(self, i: int) -> NDArray[np.float_]:
+    def get_dgw(self, i: int) -> NDArray[np.float64]:
         """
         Return IRLS weights from dayglow subtraction for frame i.
 
@@ -113,7 +113,7 @@ class PreImage:
         """
         return self.dgweight[i, :, :]
 
-    def get_shw(self, i: int) -> NDArray[np.float_]:
+    def get_shw(self, i: int) -> NDArray[np.float64]:
         """
         Return IRLS weights from SH fit for frame i.
 
@@ -129,7 +129,7 @@ class PreImage:
         """
         return self.shweight[i, :, :]
 
-    def get_model(self, i: int) -> NDArray[np.float_]:
+    def get_model(self, i: int) -> NDArray[np.float64]:
         """
         Return the dayglow model for frame i.
 
@@ -145,7 +145,7 @@ class PreImage:
         """
         return self.dgmodel[i, :, :]
 
-    def get_mcoords(self, i: int) -> tuple[NDArray[np.float_], NDArray[np.float_]]:
+    def get_mcoords(self, i: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """
         Return the magnetic coordinates for frame i.
 
@@ -161,7 +161,7 @@ class PreImage:
         """
         return self.mlat[i, :, :], self.mlon[i, :, :]
 
-    def get_gcoords(self, i: int) -> tuple[NDArray[np.float_], NDArray[np.float_]]:
+    def get_gcoords(self, i: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """
         Return the geographic coordinates for frame i.
 
