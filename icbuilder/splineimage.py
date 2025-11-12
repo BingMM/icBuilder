@@ -17,6 +17,7 @@ class SplineImage():
                  cI: ConductanceImage,
                  ncp: Optional[int] = 20,
                  ncpt: Optional[int] = None,
+                 cpt_step: Optional[int] = None,
                  k: Optional[int] = 3,
                  kt: Optional[int] = 2,
                  lH: Optional[int] = 0,
@@ -28,6 +29,7 @@ class SplineImage():
         self.ncp = ncp
         self.k = k
         self._ncpt = ncpt
+        self._cpt_step = cpt_step
         self.kt = kt
         self.lH = lH
         self.lP = lP
@@ -40,9 +42,15 @@ class SplineImage():
         self.reset_reg()
 
     @property
+    def cpt_step(self):
+        if self._cpt_step is None:
+            self._cpt_step = 5
+        return self._cpt_step
+
+    @property
     def ncpt(self):
         if self._ncpt is None:
-            self._ncpt = int((self.time[-1] - self.time[0]).total_seconds() / 60 // 5)
+            self._ncpt = int((self.time[-1] - self.time[0]).total_seconds() / 60 // self.cpt_step)
         return self._ncpt
 
 #%% Time

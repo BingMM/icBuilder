@@ -11,8 +11,9 @@ from icreader import ConductanceImage
 
 #%% Paths
 
-base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
-base = '/disk/IMAGE_FUV/fuv/'
+base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
+#base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
+#base = '/disk/IMAGE_FUV/fuv/'
 
 p_in = base + 'conductance/'
 p_out = base + 'figures/conductance/'
@@ -79,8 +80,6 @@ def plot(cI, i, c_scales, lat, lt):
 
 plt.ioff()
 for orbit in tqdm(o, total=len(o)):
-    if orbit < 560: # Continue after crash
-        continue
     filename = p_in + f'or_{str(orbit).zfill(4)}.nc'
     
     cI = ConductanceImage(filename)

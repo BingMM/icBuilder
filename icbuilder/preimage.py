@@ -1,7 +1,7 @@
 #%% Imports
 
 import numpy as np
-from netCDF4 import Dataset
+from scipy.io import netcdf_file
 from typing import Union, Optional
 from numpy.typing import NDArray
 from secsy import CSgrid
@@ -43,7 +43,7 @@ class PreImage:
     """
 
     def __init__(self,
-                 ncdf: Dataset,
+                 ncdf: netcdf_file,
                  index: Optional[Union[list[int], NDArray[np.int_]]] = None):
         """
         Load orbit file data (e.g., WIC/SI13/SI12) from a NetCDF file.

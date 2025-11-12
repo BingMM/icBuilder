@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 #%% Paths
 
 base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-orbit_file = 'or_0099.nc'
+orbit_file = 'or_0085.nc'
 conductance_file = os.path.join(base, 'conductance', orbit_file)
 spline_file = os.path.join(base, 'spline', orbit_file)
 
@@ -24,12 +24,12 @@ for i in range(8):
 
 #%% 
 
-sI = SplineImage(cI, lH = -1, lP=-1, wscaling=False)
+sI = SplineImage(cI, ncp = 20, cpt_step = 2, lH = -4, lP=-1, wscaling=False)
 
 #%%
 
-
-idx = 100
+#idx = 100
+idx = 5
 fig, axs = plt.subplots(2, 8, figsize=(16,4))
 for i in range(8):
     axs[0, i].imshow(cI.H[idx+i], vmin=0, vmax=75)
@@ -37,7 +37,8 @@ for i in range(8):
 
 #%%
 
-idx = 100
+#idx = 100
+idx = 5
 fig, axs = plt.subplots(6, 8, figsize=(16,12))
 for i in range(8):
     axs[0, i].imshow(sI.H[idx+i], vmin=0, vmax=75)

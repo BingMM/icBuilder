@@ -37,7 +37,8 @@ class BinnedImage:
                  pI: PreImage,
                  grid: CSgrid,
                  target_grid: Optional[CSgrid] = None,
-                 inflate_uncertainty: bool = False
+                 inflate_uncertainty: bool = False,
+                 SH_corrected = True
                  ):
         """
         Bin statistics from a PreImage object into a CSgrid.
@@ -68,7 +69,10 @@ class BinnedImage:
             f = grid.ingrid(lon, lat) # Find data inside the CS grid
             self.counts[i] = grid.count(lon[f], lat[f]) # Count the number of pixels in each bin
 
-            shimg = pI.get_shimg(i) # Get the SH corrected image
+            if SH_corrected:
+                img = pI.get_shimg(i) # Get the SH corrected image
+            else:
+                img = pI.get_dgimg(i) # Get the DG corrected image
             w = pI.get_dgw(i) * pI.get_shw(i) # Get and combine weights
 
             j, k = grid.bin_index(lon, lat) # Make bin index
@@ -86,7 +90,7 @@ class BinnedImage:
                     mask = (j == jj) & (k == kk)
                     
                     # Grab values in the (jj, kk) bin
-                    values = shimg.flatten()[mask]
+                    values = img.flatten()[mask]
                     
                     # Any NaN?
                     fnan = np.isnan(values)
