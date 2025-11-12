@@ -6,9 +6,10 @@ from scipy.interpolate import BSpline
 from scipy.sparse import kron, vstack, csc_matrix
 import scipy.sparse as sp
 from icreader import ConductanceImage
-from sksparse.cholmod import cholesky
+from sksparse.cholmod import cholesky 
 from scipy.io import netcdf_file
 from datetime import datetime
+from tqdm import tqdm
 
 #%%
 class SplineImage():
@@ -19,7 +20,8 @@ class SplineImage():
                  k: Optional[int] = 3,
                  kt: Optional[int] = 2,
                  lH: Optional[int] = 0,
-                 lP: Optional[int] = 0):
+                 lP: Optional[int] = 0,
+                 wscaling: Optional[bool] = False):
         
         self.cI = cI                 
         
@@ -29,11 +31,13 @@ class SplineImage():
         self.kt = kt
         self.lH = lH
         self.lP = lP
+        self.wscaling = wscaling
 
         self.reset_time()
         self.reset_spline()
         self.reset_model()
         self.reset_ev()
+        self.reset_reg()
 
     @property
     def ncpt(self):
@@ -100,6 +104,32 @@ class SplineImage():
     def dP(self):
         return self.cI.dP
     
+    @property
+    def w(self):
+        return np.where(np.isnan(self.cI.w), 1, self.cI.w)
+
+#%% Regularization scaling
+    
+    def reset_reg(self):
+        self._LTL_diag = None
+        self._LTL = None
+
+    @property
+    def LTL_diag(self):
+        if self._LTL_diag is None:
+            if self.wscaling:
+                self._LTL_diag = self.Gt.T.dot(self.w.flatten()) / self.Gt.T.dot(np.ones(self.Gt.shape[0]))
+                self._LTL_diag /= np.max(self._LTL_diag)
+            else:
+                self._LTL_diag = np.ones(self.Gt.shape[1])
+        return self._LTL_diag
+            
+    @property
+    def LTL(self):
+        if self._LTL is None:
+            self._LTL = sp.diags(self.LTL_diag, format='csr')
+        return self._LTL
+    
 #%% Spline
 
     def reset_spline(self):
@@ -135,6 +165,8 @@ class SplineImage():
         return self._Gt
         
     def generate_G_2d(self, return_sparse=False):
+        # Note optimized given the repeated values in x and y
+        # TODO: A look-up table should be used
         G = np.zeros((self.x.size, self.ncp**2))
         for i, (xi, yi) in enumerate(zip(self.x.flatten(), self.y.flatten())):
             Gx = BSpline.design_matrix(xi, self.knots, self.k).todense()
@@ -156,107 +188,179 @@ class SplineImage():
 #%% Models
 
     def reset_model(self):
-        self._mH = None
-        self._mP = None
-        self._CpH = None
-        self._CpP = None
-        self._factorH = None
-        self._factorP = None
-        
-    @property
-    def factorH(self):
-        if self._factorH is None:
-            self._mH, self._CpH, self._factorH = self.make_model(comp='hall')
-        return self._factorH
-        
-    @property
-    def mH(self):
-        if self._mH is None:
-            self._mH, self._CpH, self._factorH = self.make_model(comp='hall')
-        return self._mH
+        self._solverH = None
+        self._solverP = None
+        self._solverdH = None
+        self._solverdP = None
+        self._factord = None
     
     @property
-    def CpH(self):
-        if self._CpH is None:
-            self._mH, self._CpH, self._factorH = self.make_model(comp='hall')
-        return self._CpH
+    def solverH(self):
+        if self._solverH is None:
+            self._solverH = Solver(self.Gt, d=self.H.flatten(), q=self.dH.flatten(), l=10**self.lH, LTL=self.LTL)
+        return self._solverH
+    
+    @property
+    def solverP(self):
+        if self._solverP is None:
+            self._solverP = Solver(self.Gt, d=self.P.flatten(), q=self.dH.flatten(), l=10**self.lP, LTL=self.LTL)
+        return self._solverP
+    
+    @property
+    def factord(self):
+        if self._factord is None:
+            self._factord = Solver(self.Gt, l=1e-5).factor
+        return self._factord
+    
+    @property
+    def solverdH(self):
+        if self._solverdH is None:
+            self._solverdH = Solver(self.Gt, d=self.pdH.flatten(), factor=self.factord)
+        return self._solverdH
+    
+    @property
+    def solverdP(self):
+        if self._solverdP is None:
+            self._solverdP = Solver(self.Gt, d=self.pdP.flatten(), factor=self.factord)
+        return self._solverdP    
+    
+    @property
+    def factorH(self):
+        return self.solverH.factor
 
     @property
     def factorP(self):
-        if self._factorP is None:
-            self._mP, self._CpP, self._factorP = self.make_model(comp='pedersen')
-        return self._factorP    
+        return self.solverP.factor    
+    
+    @property
+    def mH(self):
+        return self.solverH.m
     
     @property
     def mP(self):
-        if self._mP is None:
-            self._mP, self._CpP, self._factorP = self.make_model(comp='pedersen')
-        return self._mP
+        return self.solverP.m
     
     @property
-    def CpP(self):
-        if self._CpP is None:
-            self._mP, self._CpP, self._factorP = self.make_model(comp='pedersen')
-        return self._CpP    
-    
-    def make_model(self, comp='hall'):
-        if comp == 'hall':
-            d, q, l = self.H.flatten(), self.dH.flatten(), self.lH
-        else:
-            d, q, l = self.P.flatten(), self.dP.flatten(), self.lP
+    def CH(self):
+        return self.solverH.C
+
+    @property
+    def CP(self):
+        return self.solverP.C  
         
-        f = ~(np.isnan(d) | np.isinf(d) | np.isnan(q) | np.isinf(q))
+    @property
+    def mdH(self):
+        return self.solverdH.m
     
-        return _make_model(self.Gt[f], d[f], q[f], l)
+    @property
+    def mdP(self):
+        return self.solverdP.m
     
 #%% Evaluation
 
     def reset_ev(self):
-        self._pH = None
-        self._dpH = None
+        self._pH = None        
         self._pP = None
-        self._dpP = None
+        self._pdH = None
+        self._pdP = None
+        
+        self._pdH_m = None
+        self._pdP_m = None
    
     @property
     def pH(self):
         if self._pH is None:
-            self._pH = self.ev(comp='hall')
+            self._pH = self.ev(self.mH)
         return self._pH
     
     @property
     def pP(self):
         if self._pP is None:
-            self._pP = self.ev(comp='pedersen')
+            self._pP = self.ev(self.mP)
         return self._pP
     
-    @property
-    def dpH(self):
-        if self._dpH is None:
-            self._dpH = self.ev_uncertainty(comp='hall')
-        return self._dpH
-            
-    @property
-    def dpP(self):
-        if self._dpP is None:
-            self._dpP = self.ev_uncertainty(comp='pedersen')
-        return self._dpP
-
-    def ev(self, comp='hall'):
-        if comp == 'hall':
-            m = self.mH
-        else:
-            m = self.mP
+    def ev(self, m):
         return self.Gt.dot(m).reshape((self.nt, self.n, self.n))
     
-    def ev_uncertainty(self, comp='hall'):
-        if comp == 'hall':
-            Cp = self.CpH
-        else:
-            Cp = self.CpP
+    @property
+    def pdH(self):
+        if self._pdH is None:
+            self._pdH = self.ev_uncertainty(comp='hall')
+        return self._pdH
+            
+    @property
+    def pdP(self):
+        if self._pdP is None:
+            self._pdP = self.ev_uncertainty(comp='pedersen')
+        return self._pdP
+    
+    def ev_uncertainty(self, comp='hall', block=2000):
+        C = self.CH if comp == 'hall' else self.CP
         
-        Gp = self.Gt @ Cp
-        diag_elements = np.array(self.Gt.multiply(Gp).sum(axis=1)).ravel()
+        diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
+    
+        blocks = range(0, self.Gt.shape[0], block)
+        loop = tqdm(blocks, total=len(blocks), desc=f'Chunked computation of {comp} uncertainty')
+        for start in loop:
+            end = min(start + block, self.Gt.shape[0])
+            Gblock = self.Gt[start:end]                 # (B × n) CSR
+            
+            V = C @ Gblock.T                     # (n × B) CSC
+            diag_elements[start:end] = np.sum(Gblock.multiply(V.T), axis=1).A.ravel()
+        
         return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
+
+    '''
+    def ev_uncertainty(self, comp='hall', block=1000):
+        factor = self.solverH.factor if comp == 'hall' else self.solverP.factor
+        
+        diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
+        
+        import scipy.sparse
+        
+        blocks = range(0, self.Gt.shape[0], block)
+        loop = tqdm(blocks, total=len(blocks), desc=f'Chunked computation of {comp} uncertainty')
+        
+        for start in loop:
+            end = min(start + block, self.Gt.shape[0])
+            
+            # Get block of rows as dense (if sparse enough) or keep sparse
+            Gblock = self.Gt[start:end]  # (block × n)
+            
+            # Build RHS matrix: each column corresponds to one row of Gblock
+            # We need to solve C^(-1) @ V = Gblock.T, so V = C @ Gblock.T
+            if Gblock.nnz / Gblock.size < 0.01:  # Very sparse
+                # Convert to dense for batch solving
+                RHS = Gblock.T.toarray()  # (n × block)
+            else:
+                RHS = Gblock.T.tocsc()  # Keep sparse in CSC format
+            
+            # Solve all systems at once - this is the key optimization
+            V = factor.solve_A(RHS)  # (n × block)
+            
+            # Extract diagonals efficiently
+            if scipy.sparse.issparse(V):
+                V = V.toarray()
+            
+            # Compute g_i @ v_i for each i in block
+            diag_block = np.sum(Gblock.toarray() * V.T, axis=1)
+            diag_elements[start:end] = diag_block
+        
+        return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
+    '''
+
+    @property
+    def pdH_m(self):
+        if self._pdH_m is None:
+            self._pdH_m = self.ev(self.mdH)
+        return self._pdH_m
+    
+    @property
+    def pdP_m(self):
+        if self._pdP_m is None:
+            self._pdP_m = self.ev(self.mdP)
+        return self._pdP_m
+    
 
 #%% Save image
     
@@ -317,7 +421,9 @@ class SplineImage():
                 nc.createVariable("LP_indptr", "i4", ("ncols_plus_1",))[:] = L.indptr
                 nc.LP_shape = L.shape
                 nc.createVariable('PP', "i4", ('m',))[:] = self.factorP.P()
-                
+                            
+                nc.kt = self.k
+                nc.nkt = self.nk
                 nc.kt = self.kt
                 nc.nkt = self.nkt
                 
@@ -325,21 +431,101 @@ class SplineImage():
                 nc.createDimension('g2', self.G.shape[1])
                 nc.createVariable('G', float, ('g1', 'g2'))[:] = self.G.todense()
     
-#%%
+#%% Solver class
     
-def _make_model(G, d, q, l):
-    GTQinv = G.T.multiply(1/q)  # Sparse multiplication
-
-    GTG = GTQinv @ G  # Stays sparse
-    reg_term = 10**l * np.median(GTG.diagonal()) * sp.eye(GTG.shape[0], format='csr')
-    GTG = GTG + reg_term  # Sparse regularization
-
-    GTd = GTQinv @ d  # Stays dense
-
-    factor = cholesky(GTG.tocsc())       # Performs sparse Cholesky
-    m = factor(GTd)              # Solve for m
-    Cp = factor.inv()            # Full posterior covariance
-
-    return m, Cp, factor
+class Solver():
+    def __init__(self, G, d=None, q=None, LTL=None, l=0, factor=None):                 
         
-     
+        self.G = G        
+        self._d = d
+        self._q = q         
+        self._LTL = LTL
+        
+        self.l = l
+        self._factor = factor
+        self._m = None
+        self._C = None
+        self._GT = None
+        self._A = None
+        self._GTG = None
+        self._GTd = None
+        self._f = None
+    
+    @property
+    def LTL(self):
+        if self._LTL is None:
+            self._LTL = sp.eye(self.G.shape[1], format='csr')
+        return self._LTL
+    
+    @property
+    def d(self):
+        if self._d is None:
+            self._d = np.ones(self.G.shape[0])
+        return self._d
+    
+    @property
+    def q(self):
+        if self._q is None:
+            self._q = np.ones(self.G.shape[0])
+        return self._q
+    
+    @property
+    def f(self):
+        if self._f is None:
+            self._f = ~(np.isnan(self.d) | np.isinf(self.d) | np.isnan(self.q) | np.isinf(self.q))
+        return self._f
+    
+    @property
+    def factor(self):
+        if self._factor is None:
+            self._factor = cholesky(self.A.tocsc()) # Performs sparse Cholesky
+        return self._factor
+    
+    @property
+    def m(self):
+        if self._m is None:
+            self._m = self.factor(self.GTd) # Solve for m
+        return self._m
+    
+    @property
+    def C(self):
+        if self._C is None:
+            self._C = self.factor.inv() # Full posterior covariance
+        return self._C
+    
+    @property
+    def GT(self):
+        if self._GT is None:
+            #self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])**2) # Sparse multiplication
+            self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])) # Sparse multiplication
+        return self._GT
+    
+    @property
+    def GTG(self):
+        if self._GTG is None:
+            self._GTG = self.GT @ self.G[self.f] # Stays sparse
+        return self._GTG
+    
+    @property
+    def A(self):
+        if self._A is None:
+            self._A = self.GTG + self.l * np.median(self.GTG.diagonal()) * self.LTL # Sparse regularization
+        return self._A
+    
+    @property
+    def GTd(self):
+        if self._GTd is None:
+            self._GTd = self.GT @ self.d[self.f]  # Stays dense
+        return self._GTd
+    
+    
+    
+    
+    
+    
+    
+    
+        
+    
+    
+
