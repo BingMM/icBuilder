@@ -31,11 +31,11 @@ EE_ratio = np.copy(EE)
 # Cp13m = P3
 # Tm = P2
 
-extrapolate_and_scale_wic_to_s13_fraction = 3 # set to False to not use this. The number is a scaling of the ratio between wic to s13 from the Frey table
+extrapolate_and_scale_wic_to_s13_fraction = 3 # set to None to not use this. The number is a scaling of the ratio between wic to s13 from the Frey table
 use_interp1d = True
 use_spline = False
 
-if extrapolate_and_scale_wic_to_s13_fraction:
+if not extrapolate_and_scale_wic_to_s13_fraction is None:
     x_, y_ = np.log10(EE_ratio), np.log10(wic_to_s13 * extrapolate_and_scale_wic_to_s13_fraction)
     p = np.polyfit(x_, y_, 1)
 
