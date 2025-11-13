@@ -6,14 +6,12 @@ import glob
 import matplotlib.pyplot as plt
 from polplot import pp
 from tqdm import tqdm
-
+import pathlib import Path
 from icreader import ConductanceImage
 
 #%% Paths
 
-base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-#base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
-#base = '/disk/IMAGE_FUV/fuv/'
+base = Path(__file__).resolve().parents[1] / 'example_data'
 
 p_in = base + 'conductance/'
 p_out = base + 'figures/conductance/'
@@ -32,16 +30,16 @@ def get_c_scales(cI):
                 's12s': (0, np.round(np.nanmax(cI.s12_std)+1)),
                 's13m': (0, np.round(np.nanmax(cI.s13_avg)+1)),
                 's13s': (0, np.round(np.nanmax(cI.s13_std)+1)),
-                'E0':   (0,  25),
+                'E0':   (0,  10),
                 'dE0':  (0, np.round(np.nanmax(cI.dE0)+1)),
                 'Fe':   (0, np.round(np.nanmax(cI.Fe)+1)),
                 'dFe':  (0, np.round(np.nanmax(cI.dFe)+1)),
-                'R':    (0, 150),
+                'R':    (0, 300),
                 'dR':   (0, np.round(5*np.median(cI.dR[~np.isnan(cI.dR)])+1)),
-                'H':    (0, np.round(np.nanmax(cI.H)+1)),
-                'dH':   (0, np.round(np.nanmax(cI.dH)+1)),
-                'P':    (0, np.round(np.nanmax(cI.P)+1)),
-                'dP':   (0, np.round(np.nanmax(cI.dP)+1))
+                'H':    (0, np.round(np.nanmax(cI.P)+1)),
+                'dH':   (0, np.round(np.nanmax(cI.dH/5)+1)),
+                'P':    (0, np.round(np.nanmax(cI.P/2)+1)),
+                'dP':   (0, np.round(np.nanmax(cI.dP/5)+1))
                 }
     return c_scales
     
@@ -81,7 +79,8 @@ def plot(cI, i, c_scales, lat, lt):
 plt.ioff()
 for orbit in tqdm(o, total=len(o)):
     filename = p_in + f'or_{str(orbit).zfill(4)}.nc'
-    
+    print(filename)
+
     cI = ConductanceImage(filename)
     
     c_scales = get_c_scales(cI)

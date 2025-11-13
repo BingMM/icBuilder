@@ -17,10 +17,12 @@ fP3 = interp1d(PE,P3,kind='linear')
 EE = np.array([0.2,0.5,1.0,5.0,10.0,25.0])     # Electron characteristic energy (keV)
 E1 = np.array([446,470,511,377,223,101])       #WIC counts in response to 1 mW/m² e- energy flux, Table IV
 E3 = np.array([12.8,11.3,8.75,4.26,2.11,0.74]) #SI-13 counts in response to 1 mW/m² e- energy flux, Table VII
+wic_to_s13 = E1/E3
+EE_ratio = np.copy(EE)
 
 # fE1 = interp1d(EE,E1,fill_value=(446,101),bounds_error=False)
 # fE3 = interp1d(EE,E3,fill_value=(12.8,0.74),bounds_error=False)
-# fE1divE3 = interp1d(E1/E3,EE,fill_value=(0.2,25),bounds_error=False)
+# fE1divE3 = interp1d(wic_to_s13,EE,fill_value=(0.2,25),bounds_error=False)
 
 # Translation between Notability doc and this python code
 # fWm = fE1                       # Model of WIC counts in response to 1mW/m² e- eflux
@@ -29,24 +31,40 @@ E3 = np.array([12.8,11.3,8.75,4.26,2.11,0.74]) #SI-13 counts in response to 1 mW
 # Cp13m = P3
 # Tm = P2
 
+extrapolate_and_scale_wic_to_s13_fraction = 3 # set to False to not use this. The number is a scaling of the ratio between wic to s13 from the Frey table
 use_interp1d = True
+use_spline = False
 
-splinekw = dict(k=3)
+if extrapolate_and_scale_wic_to_s13_fraction:
+    x_, y_ = np.log10(EE_ratio), np.log10(wic_to_s13 * extrapolate_and_scale_wic_to_s13_fraction)
+    p = np.polyfit(x_, y_, 1)
 
-if splinekw['k'] == 1:
-    maxE0 = 37.4
-elif splinekw['k'] == 2:
-    maxE0 = 35
-elif (splinekw['k'] == 3) or (splinekw['k'] is None):
-    maxE0 = 26.19
+    # make new arrays for EE and wic_to_s13:
+    EE_ratio = np.linspace(1e-5, 1e3, 1000)
+    wic_to_s13 = 10**np.polyval(p, np.log10(EE_ratio))
+
+
+
+
+
+if use_spline:
+    splinekw = dict(k=3)
+
+    if splinekw['k'] == 1:
+        maxE0 = 37.4
+    elif splinekw['k'] == 2:
+        maxE0 = 35
+    elif (splinekw['k'] == 3) or (splinekw['k'] is None):
+        maxE0 = 26.19
 
 ## Model of WIC electron counts for 1mW/m² energy flux as function of electron char energy in keV
 #fWm = UnivariateSpline(EE,E1,**splinekw)
 # fdWm_dE0 = fWm.derivative(1)
 
 # Limit range of electron char energy to [0,26.16] such that fWm > 0
-fWm = lambda x: UnivariateSpline(EE,E1,**splinekw)(np.clip(x,0,maxE0))
-fdWm_dE0 = lambda x: UnivariateSpline(EE,E1,**splinekw).derivative(1)(np.clip(x,0,maxE0))
+if use_spline:
+    fWm = lambda x: UnivariateSpline(EE,E1,**splinekw)(np.clip(x,0,maxE0))
+    fdWm_dE0 = lambda x: UnivariateSpline(EE,E1,**splinekw).derivative(1)(np.clip(x,0,maxE0))
 
 if use_interp1d:
     fWm = interp1d(EE,E1,fill_value=(446,101),bounds_error=False)
@@ -65,12 +83,14 @@ fFe = lambda wprime, wm: wprime/wm
 def fdFe(wprime, wm, dwprime, dwm):
     return np.sqrt( (dwprime/wm)**2 + (wprime*dwm/wm**2)**2 )
 
+
 ## electron characteristic energy model
-fE0m = UnivariateSpline(E1/E3,EE,**splinekw)
-fdE0m_dR = fE0m.derivative(1)
+if use_spline:
+    fE0m = UnivariateSpline(wic_to_s13*2,EE_ratio,**splinekw)
+    fdE0m_dR = fE0m.derivative(1)
 
 if use_interp1d:
-    fE0m = interp1d(E1/E3,EE,fill_value=(0.2,25),bounds_error=False)
+    fE0m = interp1d(wic_to_s13*2,EE_ratio,fill_value=(0.2,25),bounds_error=False)
     fdE0m_dR = lambda x: (fE0m(x+1)-fE0m(x-1))/2
 
 
@@ -78,8 +98,9 @@ if use_interp1d:
 ## MODELS OF PROTON COUNTS IN EACH CAMERA FOR 1 mW/m² input
 
 ## model of proton counts in WIC for 1 mW/m² input
-fCpwm = UnivariateSpline(PE,P1,**splinekw)
-fdCpwm_dEp = fCpwm.derivative(1)
+if use_spline:
+    fCpwm = UnivariateSpline(PE,P1,**splinekw)
+    fdCpwm_dEp = fCpwm.derivative(1)
 
 if use_interp1d:
     # fCpwm = interp1d(PE,P1,kind='linear')
@@ -97,8 +118,9 @@ def fdCpwm(Ep,dEp):
     return np.abs( fdCpwm_dEp(Ep) * dEp  )
 
 ## model of proton counts in SI-13 for 1 mW/m² input
-fCp13m = UnivariateSpline(PE,P3,**splinekw)
-fdCp13m_dEp = fCp13m.derivative(1)
+if use_spline:
+    fCp13m = UnivariateSpline(PE,P3,**splinekw)
+    fdCp13m_dEp = fCp13m.derivative(1)
 
 if use_interp1d:
     # fCp13m = interp1d(PE,P3,kind='linear')
@@ -115,8 +137,9 @@ def fdCp13m(Ep,dEp):
     return np.abs( fdCp13m_dEp(Ep) * dEp  )
 
 ## model of proton counts in SI-12 for 1 mW/m² input
-fTm = UnivariateSpline(PE,P2,**splinekw)
-fdTm_dEp = fTm.derivative(1)
+if use_spline:
+    fTm = UnivariateSpline(PE,P2,**splinekw)
+    fdTm_dEp = fTm.derivative(1)
 
 if use_interp1d:
     #fTm = interp1d(PE,P2,kind='linear')
