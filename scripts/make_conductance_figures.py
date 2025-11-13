@@ -6,7 +6,7 @@ import glob
 import matplotlib.pyplot as plt
 from polplot import pp
 from tqdm import tqdm
-import pathlib import Path
+from pathlib import Path
 from icreader import ConductanceImage
 
 #%% Paths
