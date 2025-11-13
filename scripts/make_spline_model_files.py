@@ -24,7 +24,7 @@ for i in range(8):
 
 #%% 
 
-sI = SplineImage(cI, ncp = 20, cpt_step = 2, lH = -4, lP=-1, wscaling=False)
+sI = SplineImage(cI, ncp = 30, cpt_step = 3, lH = -3, lP=-1, wscaling=True, kt=3)
 
 #%%
 

@@ -504,8 +504,8 @@ class Solver():
     @property
     def GT(self):
         if self._GT is None:
-            #self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])**2) # Sparse multiplication
-            self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])) # Sparse multiplication
+            self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])**2) # Sparse multiplication
+            #self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])) # Sparse multiplication
         return self._GT
     
     @property
