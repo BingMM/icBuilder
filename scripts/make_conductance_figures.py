@@ -1,6 +1,7 @@
 #%% Import 
 
 import os
+from os.path import join as pjoin
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
@@ -11,15 +12,15 @@ from icreader import ConductanceImage
 
 #%% Paths
 
-base = Path(__file__).resolve().parents[1] / 'example_data'
+base = pjoin(Path(__file__).resolve().parents[1], 'example_data')
 
-p_in = base + 'conductance/'
-p_out = base + 'figures/conductance/'
+p_in  = pjoin(base, 'conductance')
+p_out = pjoin(base, 'figures', 'conductance')
 
 #%% Fetch orbits available in all nc files
 
 # Fetch all orbits
-o = [int(o[-7:-3]) for o in sorted(glob.glob(p_in + '*.nc'))]
+o = [int(o[-7:-3]) for o in sorted(glob.glob(pjoin(p_in, '*.nc')))]
 
 #%% Func
 
@@ -78,7 +79,7 @@ def plot(cI, i, c_scales, lat, lt):
 
 plt.ioff()
 for orbit in tqdm(o, total=len(o)):
-    filename = p_in + f'or_{str(orbit).zfill(4)}.nc'
+    filename = pjoin(p_in, f'or_{str(orbit).zfill(4)}.nc')
     print(filename)
 
     cI = ConductanceImage(filename)
@@ -88,13 +89,13 @@ for orbit in tqdm(o, total=len(o)):
     lat = cI.grid.lat
     lt = (cI.grid.lon/15)%24
     
-    p_out_o = p_out + f'or_{str(orbit).zfill(4)}/'
+    p_out_o = pjoin(p_out, f'or_{str(orbit).zfill(4)}')
     os.makedirs(p_out_o, exist_ok=True)
     
     for i in range(cI.shape[0]):
         try:
             plot(cI, i, c_scales, lat, lt)
-            plt.savefig(p_out_o + f'{str(i).zfill(3)}.png', bbox_inches='tight')
+            plt.savefig(pjoin(p_out_o, f'{str(i).zfill(3)}.png'), bbox_inches='tight')
         except:
             print(f'Plot failed: orbit {orbit}, index {i}')
         plt.close('all')
