@@ -35,34 +35,33 @@ def get_c_scales(cI):
                 'dE0':  (0, np.round(np.nanmax(cI.dE0)+1)),
                 'Fe':   (0, np.round(np.nanmax(cI.Fe)+1)),
                 'dFe':  (0, np.round(np.nanmax(cI.dFe)+1)),
-                'R':    (0, 300),
+                'R':    (0, 150),
                 'dR':   (0, np.round(5*np.median(cI.dR[~np.isnan(cI.dR)])+1)),
                 'H':    (0, np.round(np.nanmax(cI.H)+1)),
                 'dH':   (0, np.round(np.nanmax(cI.dH/5)+1)),
                 'P':    (0, np.round(np.nanmax(cI.P)+1)),
-                'dP':   (0, np.round(np.nanmax(cI.dP/5)+1))
-                }
+                'dP':   (0, np.round(np.nanmax(cI.dP/5)+1)),
+                'H/P':  (0, 8)}
     return c_scales
     
 def plot(cI, i, c_scales, lat, lt):    
         
     fig, axs = plt.subplots(3, 6, figsize=(30, 15))
     plt.subplots_adjust(wspace=0.05, hspace=0.05)
-    axes = axs.flatten()[:-2]
-    axs[2, 4].set_axis_off()
+    axes = axs.flatten()[:-1]
     axs[2, 5].set_axis_off()
     
     var = [cI.wic_avg[i], cI.wic_std[i], cI.R[i],  cI.dR[i],  cI.H[i], cI.dH[i],
            cI.s13_avg[i], cI.s13_std[i], cI.E0[i], cI.dE0[i], cI.P[i], cI.dP[i],
-           cI.s12_avg[i], cI.s12_std[i], cI.Fe[i], cI.dFe[i]]
+           cI.s12_avg[i], cI.s12_std[i], cI.Fe[i], cI.dFe[i], .45*cI.E0[i]**.85]
     
     cs = [c_scales['wicm'], c_scales['wics'], c_scales['R'],  c_scales['dR'],  c_scales['H'], c_scales['dH'],
           c_scales['s13m'], c_scales['s13s'], c_scales['E0'], c_scales['dE0'], c_scales['P'], c_scales['dP'],
-          c_scales['s12m'], c_scales['s12s'], c_scales['Fe'], c_scales['dFe']]
+          c_scales['s12m'], c_scales['s12s'], c_scales['Fe'], c_scales['dFe'], c_scales['H/P']]
     
     tit = ['avg WIC counts', 'std WIC counts', 'WIC*/S13* (R)', 'R std', 'Hall', 'Hall std',
             'avg S13 counts', 'std S13 counts', 'E0', 'E0 std', 'Pedersen', 'Pedersen std',
-            'avg S12 counts', 'std S12 counts', 'Fe', 'Fe std']
+            'avg S12 counts', 'std S12 counts', 'Fe', 'Fe std', 'H/P ratio']
     
     for j, (ax, var_, cs_, tit_) in enumerate(zip(axes, var, cs, tit)):
         pax = pp(ax)

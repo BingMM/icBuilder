@@ -116,9 +116,9 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     s13_pI.discard(f)
 
         # Bin and conductance images
-    wic_bI = BinnedImage(wic_pI, grid_w, inflate_uncertainty=True)
-    s12_bI = BinnedImage(s12_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, SH_corrected=False)
-    s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, SH_corrected=False)
+    wic_bI = BinnedImage(wic_pI, grid_w, inflate_uncertainty=True, correction='SH')
+    s12_bI = BinnedImage(s12_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG')
+    s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG')
     cI = ConductanceImage(wic_bI, s12_bI, s13_bI, time=t)
         # Save to netCDF
     out_path = pjoin(p_out, f'or_{orbit:04d}.nc')

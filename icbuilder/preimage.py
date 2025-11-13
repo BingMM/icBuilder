@@ -57,13 +57,29 @@ class PreImage:
         """
         self.index = index
 
-        var_names = ['mlat', 'mlon', 'glat', 'glon', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']
+        var_names = ['mlat', 'mlon', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']
         for name in var_names:
             var_data = ncdf.variables[name]
             data = var_data[...] if index is None else var_data[index, :, :]
             setattr(self, name, np.copy(data))
 
         self.shape = self.mlat.shape
+
+    def get_img(self, i: int) -> NDArray[np.float64]:
+        """
+        Return the image for frame i.
+
+        Parameters
+        ----------
+        i : int
+            Frame index.
+
+        Returns
+        -------
+        np.ndarray
+            Image.
+        """
+        return self.img[i, :, :]
 
     def get_shimg(self, i: int) -> NDArray[np.float64]:
         """
