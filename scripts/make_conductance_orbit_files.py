@@ -1,5 +1,7 @@
 #%% Import 
 
+from os.path import join as pjoin
+from pathlib import Path
 import numpy as np
 import glob
 from secsy import CSgrid, CSprojection
@@ -62,9 +64,9 @@ def safe_apex_convert(apex, glat_row, glon_row, height=110):
 def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_thres=0.1):
     #try:
     # Load nc orbit files
-    wic_nc = netcdf_file(p_wic_nc + f'wic_or{orbit:04d}.nc', 'r')
-    s12_nc = netcdf_file(p_s12_nc + f's12_or{orbit:04d}.nc', 'r')
-    s13_nc = netcdf_file(p_s13_nc + f's13_or{orbit:04d}.nc', 'r')
+    wic_nc = netcdf_file(pjoin(p_wic_nc, f'wic_or{orbit:04d}.nc'), 'r')
+    s12_nc = netcdf_file(pjoin(p_s12_nc, f's12_or{orbit:04d}.nc'), 'r')
+    s13_nc = netcdf_file(pjoin(p_s13_nc, f's13_or{orbit:04d}.nc'), 'r')
 
     # Get start time for each instrument
     t0_wic = datetime.strptime(b''.join(wic_nc.variables['t_start'].data).decode('utf8'), '%Y-%m-%dT%H:%M:%S')
@@ -119,7 +121,7 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, SH_corrected=False)
     cI = ConductanceImage(wic_bI, s12_bI, s13_bI, time=t)
         # Save to netCDF
-    out_path = f'{p_out}or_{orbit:04d}.nc'
+    out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
     cI.to_nc(out_path)
     return orbit  # Success
     #except Exception as e:
@@ -157,22 +159,21 @@ def run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, paral
 
 #%% Paths
 
-base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-#base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
+base = pjoin(Path(__file__).resolve().parents[1], 'example_data')
 #base = '/disk/IMAGE_FUV/fuv/'
 
 
-p_wic_nc = base + 'wic/'
-p_s12_nc = base + 's12/'
-p_s13_nc = base + 's13/'
+p_wic_nc = pjoin(base, 'wic')
+p_s12_nc = pjoin(base, 's12')
+p_s13_nc = pjoin(base, 's13')
 
-p_out = base + 'conductance/'
+p_out = pjoin(base, 'conductance')
 
 #%% Fetch orbits available in all nc files
 
 def get_orbit_list(p_nc, p_npy, sensor):
     # Fetch all orbits
-    o = np.array([int(o[-7:-3]) for o in sorted(glob.glob(p_nc + '*.nc'))])
+    o = np.array([int(o[-7:-3]) for o in sorted(glob.glob(pjoin(p_nc, '*.nc')))])
     
     # Load file with orbit quality
     avail = np.load(p_npy)
@@ -182,9 +183,9 @@ def get_orbit_list(p_nc, p_npy, sensor):
     # Grab orbits
     return o[np.isin(o, avail)]
 
-o_wic = get_orbit_list(p_wic_nc, base + 'wic_avail_orbit.npy', 'WIC')
-o_s12 = get_orbit_list(p_s12_nc, base + 's12_avail_orbit.npy', 'S12')
-o_s13 = get_orbit_list(p_s13_nc, base + 's13_avail_orbit.npy', 'S13')
+o_wic = get_orbit_list(p_wic_nc, pjoin(base, 'wic_avail_orbit.npy'), 'WIC')
+o_s12 = get_orbit_list(p_s12_nc, pjoin(base, 's12_avail_orbit.npy'), 'S12')
+o_s13 = get_orbit_list(p_s13_nc, pjoin(base, 's13_avail_orbit.npy'), 'S13')
 
 # Create list of all overlapping orbits
 o = set(o_wic) & set(o_s12) & set(o_s13)

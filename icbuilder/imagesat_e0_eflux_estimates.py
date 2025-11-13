@@ -31,7 +31,7 @@ EE_ratio = np.copy(EE)
 # Cp13m = P3
 # Tm = P2
 
-extrapolate_and_scale_wic_to_s13_fraction = 3 # set to None to not use this. The number is a scaling of the ratio between wic to s13 from the Frey table
+extrapolate_and_scale_wic_to_s13_fraction = None # set to None to not use this. The number is a scaling of the ratio between wic to s13 from the Frey table
 use_interp1d = True
 use_spline = False
 
@@ -86,11 +86,13 @@ def fdFe(wprime, wm, dwprime, dwm):
 
 ## electron characteristic energy model
 if use_spline:
-    fE0m = UnivariateSpline(wic_to_s13*2,EE_ratio,**splinekw)
+    #fE0m = UnivariateSpline(wic_to_s13*2,EE_ratio,**splinekw)
+    fE0m = UnivariateSpline(wic_to_s13, EE_ratio, **splinekw)
     fdE0m_dR = fE0m.derivative(1)
 
 if use_interp1d:
-    fE0m = interp1d(wic_to_s13*2,EE_ratio,fill_value=(0.2,25),bounds_error=False)
+    #fE0m = interp1d(wic_to_s13*2,EE_ratio,fill_value=(0.2,25),bounds_error=False)
+    fE0m = interp1d(wic_to_s13, EE_ratio, fill_value=(0.2,25), bounds_error=False)
     fdE0m_dR = lambda x: (fE0m(x+1)-fE0m(x-1))/2
 
 

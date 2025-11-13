@@ -37,9 +37,9 @@ def get_c_scales(cI):
                 'dFe':  (0, np.round(np.nanmax(cI.dFe)+1)),
                 'R':    (0, 300),
                 'dR':   (0, np.round(5*np.median(cI.dR[~np.isnan(cI.dR)])+1)),
-                'H':    (0, np.round(np.nanmax(cI.P)+1)),
+                'H':    (0, np.round(np.nanmax(cI.H)+1)),
                 'dH':   (0, np.round(np.nanmax(cI.dH/5)+1)),
-                'P':    (0, np.round(np.nanmax(cI.P/2)+1)),
+                'P':    (0, np.round(np.nanmax(cI.P)+1)),
                 'dP':   (0, np.round(np.nanmax(cI.dP/5)+1))
                 }
     return c_scales
