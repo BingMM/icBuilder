@@ -1,6 +1,7 @@
 #%%
 
 import os
+from os.path import join as pjoin
 import fuvpy as fuv
 import pandas as pd
 import numpy as np
@@ -18,16 +19,17 @@ print(f'Settings:\n WIC: {do_wic}\n SI12: {do_s12}\n SI13: {do_s13}\n Parallel: 
 
 #%% Base
 
-base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
+#base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
+base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
 
 print(f'Base set to {base}')
 
 #%% Import orbit files file 
 
 print('Reading h5 files')
-wicfiles = pd.read_hdf(base + 'wicfiles.h5', key='data')
-s12files = pd.read_hdf(base + 's12files.h5', key='data')
-s13files = pd.read_hdf(base + 's13files.h5', key='data')
+wicfiles = pd.read_hdf(pjoin(base, 'wicfiles.h5'), key='data')
+s12files = pd.read_hdf(pjoin(base, 's12files.h5'), key='data')
+s13files = pd.read_hdf(pjoin(base, 's13files.h5'), key='data')
 
 #%%
 
@@ -49,7 +51,11 @@ def process_single_orbit(orbit, files, inpath, outpath, reflat, file_prefix):
                                    stop=0.01, tukeyVal=5, dampingVal=1e-4)
 
         outfile = os.path.join(outpath, f"{file_prefix}_or{str(orbit).zfill(4)}.nc")
-        s.to_netcdf(outfile, format='NETCDF3_64BIT', engine='scipy')
+        encoding = {var: 
+                    {"zlib": True, "complevel": 4}
+                    for var in s.data_vars
+                    }
+        s.to_netcdf(outfile, format="NETCDF4", encoding=encoding)
 
         return (orbit, 1)
 

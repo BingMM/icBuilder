@@ -69,7 +69,8 @@ def make_plot(s, sensor, figname):
     vmin = np.array([0, 0, 0])[isensor]
     vmax = np.array([5000, 40, 20])[isensor]
     pax = pp(plt.subplot(gs[0,0]),minlat=50)
-    fuv.plotimg(s,'img',pax=pax,crange=(vmin,vmax),cmap='magma')
+    #fuv.plotimg(s,'img',pax=pax,crange=(vmin,vmax),cmap='magma')
+    fuv.plotimg(s,'img',pax=pax,crange=None,cmap='magma')
     cbaxes = pax.ax.inset_axes([.2,.0,.6,.03])
     cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='max')
     cb.set_label('Projected image [counts]', fontsize=fs1)
@@ -80,7 +81,8 @@ def make_plot(s, sensor, figname):
 
     # Dayglow
     pax = pp(plt.subplot(gs[0,1]),minlat=50)
-    fuv.plotimg(s,'dgmodel',pax=pax,crange=(vmin,vmax),cmap='magma')
+    #fuv.plotimg(s,'dgmodel',pax=pax,crange=(vmin,vmax),cmap='magma')
+    fuv.plotimg(s,'dgmodel',pax=pax,crange=None,cmap='magma')
     cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
     cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='max')
     cb.set_label('BS model [counts]', fontsize=fs1)
@@ -88,10 +90,13 @@ def make_plot(s, sensor, figname):
     pax.write(50, 9, '50$^{\circ}$',va='center',ha='center',fontsize=fs2)
 
     # Corr
-    vmin = np.array([-1000, -15, -5])[isensor]
-    vmax = np.array([1000, 15, 5])[isensor]
+    #vmin = np.array([-1000, -15, -5])[isensor]
+    #vmax = np.array([1000, 15, 5])[isensor]
+    vmin = np.array([-5000, -40, -20])[isensor]
+    vmax = np.array([5000, 40, 20])[isensor]
     pax = pp(plt.subplot(gs[0,2]),minlat=50)
-    fuv.plotimg(s,'dgimg',pax=pax,crange=(vmin,vmax),cmap='coolwarm')
+    #fuv.plotimg(s,'dgimg',pax=pax,crange=(vmin,vmax),cmap='coolwarm')
+    fuv.plotimg(s,'dgimg',pax=pax,crange=None,cmap='coolwarm')
     cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
     cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
     cb.set_label('BS corrected image [counts]', fontsize=fs1)
@@ -112,7 +117,8 @@ def make_plot(s, sensor, figname):
     vmin = np.array([-1000, -15, -5])[isensor]
     vmax = np.array([1000, 15, 5])[isensor]
     pax = pp(plt.subplot(gs[1,1]),minlat=50)
-    fuv.plotimg(s,'shmodel',pax=pax,crange=(vmin,vmax),cmap='coolwarm')
+    #fuv.plotimg(s,'shmodel',pax=pax,crange=(vmin,vmax),cmap='coolwarm')
+    fuv.plotimg(s,'shmodel',pax=pax,crange=None,cmap='coolwarm')
     cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
     cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
     cb.set_label('SH model [counts]', fontsize=fs1)
@@ -122,8 +128,11 @@ def make_plot(s, sensor, figname):
     pax.write(50, 9, '50$^{\circ}$',va='center',ha='center',fontsize=fs2)
 
     # Corr
+    vmin = np.array([-5000, -40, -20])[isensor]
+    vmax = np.array([5000, 40, 20])[isensor]
     pax = pp(plt.subplot(gs[1,2]),minlat=50)
-    fuv.plotimg(s,'shimg',pax=pax,crange=(vmin,vmax),cmap='coolwarm')
+    #fuv.plotimg(s,'shimg',pax=pax,crange=(vmin,vmax),cmap='coolwarm')
+    fuv.plotimg(s,'shimg',pax=pax,crange=None,cmap='coolwarm')
     cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
     cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
     cb.set_label('SH corrected image [counts]', fontsize=fs1)

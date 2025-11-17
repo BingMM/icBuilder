@@ -24,24 +24,27 @@ o = [int(o[-7:-3]) for o in sorted(glob.glob(pjoin(p_in, '*.nc')))]
 
 #%% Func
 
+def get_max(x, quan=.999):
+    return np.round(np.nanquantile(x, quan)+1)
+
 def get_c_scales(cI):
-    c_scales = {'wicm': (0, np.round(np.nanmax(cI.wic_avg)+1)),
-                'wics': (0, np.round(np.nanmax(cI.wic_std)+1)),
-                's12m': (0, np.round(np.nanmax(cI.s12_avg)+1)),
-                's12s': (0, np.round(np.nanmax(cI.s12_std)+1)),
-                's13m': (0, np.round(np.nanmax(cI.s13_avg)+1)),
-                's13s': (0, np.round(np.nanmax(cI.s13_std)+1)),
+    c_scales = {'wicm': (0, get_max(cI.wic_avg)),
+                'wics': (0, get_max(cI.wic_std)),
+                's12m': (0, get_max(cI.s12_avg)),
+                's12s': (0, get_max(cI.s12_std)),
+                's13m': (0, get_max(cI.s13_avg)),
+                's13s': (0, get_max(cI.s13_std)),
                 'E0':   (0,  10),
-                'dE0':  (0, np.round(np.nanmax(cI.dE0)+1)),
-                'Fe':   (0, np.round(np.nanmax(cI.Fe)+1)),
-                'dFe':  (0, np.round(np.nanmax(cI.dFe)+1)),
+                'dE0':  (0, get_max(cI.dE0)),
+                'Fe':   (0, get_max(cI.Fe)),
+                'dFe':  (0, get_max(cI.dFe)),
                 'R':    (0, 150),
                 'dR':   (0, np.round(5*np.median(cI.dR[~np.isnan(cI.dR)])+1)),
-                'H':    (0, np.round(np.nanmax(cI.H)+1)),
-                'dH':   (0, np.round(np.nanmax(cI.dH/5)+1)),
-                'P':    (0, np.round(np.nanmax(cI.P)+1)),
-                'dP':   (0, np.round(np.nanmax(cI.dP/5)+1)),
-                'H/P':  (0, 8)}
+                'H':    (0, get_max(cI.H)),
+                'dH':   (0, get_max(cI.dH)),
+                'P':    (0, get_max(cI.P)),
+                'dP':   (0, get_max(cI.dP)),
+                'H/P':  (0, get_max(.45*cI.E0**.85))}
     return c_scales
     
 def plot(cI, i, c_scales, lat, lt):    

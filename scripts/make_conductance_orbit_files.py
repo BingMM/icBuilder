@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import glob
 from secsy import CSgrid, CSprojection
-from scipy.io import netcdf_file
+from netCDF4 import Dataset
 from datetime import datetime, timedelta
 import apexpy
 from tqdm import tqdm
@@ -64,14 +64,14 @@ def safe_apex_convert(apex, glat_row, glon_row, height=110):
 def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_thres=0.1):
     #try:
     # Load nc orbit files
-    wic_nc = netcdf_file(pjoin(p_wic_nc, f'wic_or{orbit:04d}.nc'), 'r')
-    s12_nc = netcdf_file(pjoin(p_s12_nc, f's12_or{orbit:04d}.nc'), 'r')
-    s13_nc = netcdf_file(pjoin(p_s13_nc, f's13_or{orbit:04d}.nc'), 'r')
+    wic_nc = Dataset(pjoin(p_wic_nc, f'wic_or{orbit:04d}.nc'), 'r')
+    s12_nc = Dataset(pjoin(p_s12_nc, f's12_or{orbit:04d}.nc'), 'r')
+    s13_nc = Dataset(pjoin(p_s13_nc, f's13_or{orbit:04d}.nc'), 'r')
 
     # Get start time for each instrument
-    t0_wic = datetime.strptime(b''.join(wic_nc.variables['t_start'].data).decode('utf8'), '%Y-%m-%dT%H:%M:%S')
-    t0_s12 = datetime.strptime(b''.join(s12_nc.variables['t_start'].data).decode('utf8'), '%Y-%m-%dT%H:%M:%S')
-    t0_s13 = datetime.strptime(b''.join(s13_nc.variables['t_start'].data).decode('utf8'), '%Y-%m-%dT%H:%M:%S')
+    t0_wic = datetime.strptime(wic_nc.variables['t_start'][:], '%Y-%m-%dT%H:%M:%S')
+    t0_s12 = datetime.strptime(s12_nc.variables['t_start'][:], '%Y-%m-%dT%H:%M:%S')
+    t0_s13 = datetime.strptime(s13_nc.variables['t_start'][:], '%Y-%m-%dT%H:%M:%S')
 
         # Get time for each sensor
     t_wic = [t0_wic + timedelta(seconds=int(sec)) for sec in wic_nc.variables['date'][:]]
@@ -122,7 +122,8 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     cI = ConductanceImage(wic_bI, s12_bI, s13_bI, time=t)
         # Save to netCDF
     out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
-    cI.to_nc(out_path)
+    #cI.to_nc(out_path)
+    cI.to_nc_new(out_path)
     return orbit  # Success
     #except Exception as e:
     #    print(f"Failed orbit {orbit}: {e}")

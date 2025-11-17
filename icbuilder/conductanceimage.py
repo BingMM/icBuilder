@@ -4,8 +4,8 @@ import numpy as np
 from typing import Union, Optional
 from numpy.typing import NDArray
 from copy import deepcopy as dcopy
-from scipy.io import netcdf_file
 from datetime import datetime
+from netCDF4 import Dataset
 
 # External dependencies
 from .imagesat_e0_eflux_estimates import E0_eflux_propagated as EF_fun
@@ -164,44 +164,61 @@ class ConductanceImage:
 
         self.w = (self.wic_w + self.s12_w + self.s13_w)/3
 
-    def to_nc(self, filename: str):
+    def to_nc_new(self, filename: str):
         """
-        Save conductance image to a NetCDF file.
+        Save conductance image to a NetCDF4 file.
         Can be read/rebuilt using the icReader library.
-
+        
         Parameters
         ----------
         filename : str
             Full path to output NetCDF file.
         """
-        with netcdf_file(filename, 'w') as nc:
+    
+        # Create a NetCDF4 file (not netcdf3)
+        with Dataset(filename, "w", format="NETCDF4") as nc:
             t, y, x = self.shape
-            nc.createDimension('time', t)
-            nc.createDimension('dim1', y)
-            nc.createDimension('dim2', x)
-
+    
+            # Root-level dimensions
+            nc.createDimension("time", t)
+            nc.createDimension("dim1", y)
+            nc.createDimension("dim2", x)
+    
+            # Helper
             def save_var(name, data):
-                var = nc.createVariable(name, float, ('time', 'dim1', 'dim2'))
-                var[:] = data
-
-            for attr in ['wic_avg', 's12_avg', 's13_avg', 'wic_std', 's12_std', 's13_std', 
-                         'E0', 'dE0', 'Fe', 'dFe', 'R', 'dR', 'P', 'H', 'dP', 'dH', 'w']:
+                v = nc.createVariable(name, "f4", ("time", "dim1", "dim2"))
+                v[:] = data
+    
+            # Save main variables
+            for attr in [
+                "wic_avg", "s12_avg", "s13_avg", "wic_std", "s12_std", "s13_std",
+                "E0", "dE0", "Fe", "dFe", "R", "dR", "P", "H", "dP", "dH", "w"
+            ]:
                 save_var(attr, getattr(self, attr))
-
-            nc.Ep = float(self.Ep)
+    
+            # Scalars
+            nc.Ep  = float(self.Ep)
             nc.dEp = float(self.dEp)
-
+    
+            # Time variable
             if self.time is not None:
                 ref_time = datetime(2000, 1, 1)
-                time_seconds = np.array([(t - ref_time).total_seconds() for t in self.time], dtype=np.int32)
-                nc.createVariable("time", np.int32, ("time",))[:] = time_seconds
+                time_seconds = np.array(
+                    [(t - ref_time).total_seconds() for t in self.time],
+                    dtype=np.int32
+                )
+                vtime = nc.createVariable("time", "i4", ("time",))
+                vtime[:] = time_seconds
                 nc.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
+    
+            # Grid GROUP
+            grid_grp = nc.createGroup("grid")
 
-            if self.grid and hasattr(self.grid, "projection"):
-                nc.position     = self.grid.projection.position.astype(float)
-                nc.orientation  = self.grid.projection.orientation
-                nc.L    = self.grid.L
-                nc.W    = self.grid.W
-                nc.Lres = self.grid.Lres
-                nc.Wres = self.grid.Wres
-                nc.gridR    = self.grid.R
+            # Grid metadata
+            grid_grp.position    = self.grid.projection.position.astype(float)
+            grid_grp.orientation = self.grid.projection.orientation
+            grid_grp.L    = self.grid.L
+            grid_grp.W    = self.grid.W
+            grid_grp.Lres = self.grid.Lres
+            grid_grp.Wres = self.grid.Wres
+            grid_grp.R    = self.grid.R
