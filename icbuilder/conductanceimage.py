@@ -186,7 +186,7 @@ class ConductanceImage:
     
             # Helper
             def save_var(name, data):
-                v = nc.createVariable(name, "f4", ("time", "dim1", "dim2"))
+                v = nc.createVariable(name, "f4", ("time", "dim1", "dim2"), zlib=True)
                 v[:] = data
     
             # Save main variables

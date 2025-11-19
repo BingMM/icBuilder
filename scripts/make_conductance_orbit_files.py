@@ -11,8 +11,8 @@ import apexpy
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map  # tqdm-compatible multiprocessing
 from functools import partial
-
 from icbuilder import PreImage, BinnedImage, ConductanceImage
+import argparse
 
 #%% Fun
 
@@ -160,9 +160,23 @@ def run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, paral
 
 #%% Paths
 
-base = pjoin(Path(__file__).resolve().parents[1], 'example_data')
-#base = '/disk/IMAGE_FUV/fuv/'
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    v = v.lower()
+    if v in ('yes', 'true', 't', '1'):
+        return True
+    elif v in ('no', 'false', 'f', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
+parser = argparse.ArgumentParser(description="Process FUV data.")
+parser.add_argument('--base', type=str,
+                    default=str(pjoin(Path(__file__).resolve().parents[1], 'example_data')),
+                    help='Base data directory')
+
+base = parser.parse_args().base
 
 p_wic_nc = pjoin(base, 'wic')
 p_s12_nc = pjoin(base, 's12')

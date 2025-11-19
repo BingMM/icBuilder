@@ -10,6 +10,7 @@ from sksparse.cholmod import cholesky
 from scipy.io import netcdf_file
 from datetime import datetime
 from tqdm import tqdm
+from netCDF4 import Dataset
 
 #%%
 class SplineImage():
@@ -50,7 +51,7 @@ class SplineImage():
     @property
     def ncpt(self):
         if self._ncpt is None:
-            self._ncpt = int((self.time[-1] - self.time[0]).total_seconds() / 60 // self.cpt_step)
+            self._ncpt = int((self.time[-1] - self.time[0]).total_seconds() / 60 / self.cpt_step)
         return self._ncpt
 
 #%% Time
@@ -302,7 +303,7 @@ class SplineImage():
             self._pdP = self.ev_uncertainty(comp='pedersen')
         return self._pdP
     
-    def ev_uncertainty(self, comp='hall', block=2000):
+    def ev_uncertainty_old(self, comp='hall', block=2000):
         C = self.CH if comp == 'hall' else self.CP
         
         diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
@@ -317,6 +318,37 @@ class SplineImage():
             diag_elements[start:end] = np.sum(Gblock.multiply(V.T), axis=1).A.ravel()
         
         return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
+    
+    def ev_uncertainty(self, comp='hall', block=2000):
+        """
+        Compute sqrt(diag(G Cp G^T)) without forming Cp.
+        Uses CHOLMOD triangular solves instead of explicit posterior covariance.
+        """
+        factor = self.factorH if comp == 'hall' else self.factorP    # Cholesky object
+    
+        diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
+    
+        blocks = range(0, self.Gt.shape[0], block)
+        loop = tqdm(blocks, total=len(blocks), desc=f'Chunked computation of {comp} uncertainty')    
+        for start in loop:
+            end = min(start + block, self.Gt.shape[0])
+    
+            # Grab block of rows (B × nmodel)
+            Gblock = self.Gt[start:end]
+    
+            # Solve Λ X = Gblock.T  →  X = Cp @ Gblock.T
+            # This gives an (nmodel × B) matrix
+            Y = factor.solve_L(Gblock.T)
+            X = factor.solve_Lt(Y)
+                        
+            #X = factor.solve_A(Gblock.T)     # batched triangular solve
+    
+            # diag(G Cp G^T)_{i} = sum_j G[i,j] * X[j,i]
+            # X.T has same shape as Gblock
+            diag_elements[start:end] = np.sum(Gblock.multiply(X.T), axis=1).A.ravel()
+    
+        return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
+
 
     '''
     def ev_uncertainty(self, comp='hall', block=1000):
@@ -372,7 +404,7 @@ class SplineImage():
 
 #%% Save image
     
-    def to_nc(self, filename: str):
+    def to_nc_old(self, filename: str):
             """
             Save spline image to a NetCDF file.
             Can be read/rebuilt using the icReader library.
@@ -390,8 +422,8 @@ class SplineImage():
     
                 nc.createVariable('H',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pH
                 nc.createVariable('P',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pP
-                nc.createVariable('dH', 'f8', ('time', 'dim1', 'dim2'))[:] = self.dpH
-                nc.createVariable('dP', 'f8', ('time', 'dim1', 'dim2'))[:] = self.dpH
+                nc.createVariable('dH', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
+                nc.createVariable('dP', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
     
                 if self.time is not None:
                     ref_time = datetime(2000, 1, 1)
@@ -438,7 +470,84 @@ class SplineImage():
                 nc.createDimension('g1', x*y)
                 nc.createDimension('g2', self.G.shape[1])
                 nc.createVariable('G', float, ('g1', 'g2'))[:] = self.G.todense()
+
+    def to_nc(self, filename: str):
+            """
+            Save spline image to a NetCDF4 file.
+            Can be read/rebuilt using the icReader library.
     
+            Parameters
+            ----------
+            filename : str
+                Full path to output NetCDF file.
+            """
+            with Dataset(filename, 'w') as nc:
+                
+                # Groups
+                data_grp = nc.createGroup("data")
+                model_grp = nc.createGroup("model")
+                spline_grp = nc.createGroup("spline")
+                grid_grp = nc.createGroup("grid")
+                
+                
+                # Data space group
+                t, y, x = self.nt, self.n, self.n
+                data_grp.createDimension('time', t)
+                data_grp.createDimension('dim1', y)
+                data_grp.createDimension('dim2', x)
+    
+                data_grp.createVariable('H',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pH
+                data_grp.createVariable('P',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pP
+                data_grp.createVariable('dH', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
+                data_grp.createVariable('dP', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
+    
+                if self.time is not None:
+                    ref_time = datetime(2000, 1, 1)
+                    time_seconds = np.array([(t - ref_time).total_seconds() for t in self.time], dtype=np.int32)
+                    data_grp.createVariable("time", np.int32, ("time",))[:] = time_seconds
+                    data_grp.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
+    
+                # Grid group
+                if self.grid and hasattr(self.grid, "projection"):
+                    grid_grp.position     = self.grid.projection.position.astype(float)
+                    grid_grp.orientation  = self.grid.projection.orientation
+                    grid_grp.L    = self.grid.L
+                    grid_grp.W    = self.grid.W
+                    grid_grp.Lres = self.grid.Lres
+                    grid_grp.Wres = self.grid.Wres
+                    grid_grp.gridR    = self.grid.R
+
+                
+                # Model group
+                model_grp.createDimension('m', self.mH.size)
+                model_grp.createDimension('ncols_plus_1', self.mH.size+1)
+                
+                model_grp.createVariable('mH', 'f8', ('m',), zlib=True)[:] = self.mH
+                model_grp.createVariable('mP', 'f8', ('m',), zlib=True)[:] = self.mP
+                                
+                L = self.factorH.L()
+                model_grp.createDimension('LH_nnz', L.nnz)
+                model_grp.createVariable("LH_data", "f4", ("LH_nnz",), zlib=True)[:] = L.data
+                model_grp.createVariable("LH_indices", "i4", ("LH_nnz",), zlib=True)[:] = L.indices
+                model_grp.createVariable("LH_indptr", "i4", ("ncols_plus_1",), zlib=True)[:] = L.indptr
+                model_grp.LH_shape = L.shape
+                model_grp.createVariable('PH', "i4", ('m',), zlib=True)[:] = self.factorH.P()
+                
+                L = self.factorP.L()
+                model_grp.createDimension('LP_nnz', L.nnz)
+                model_grp.createVariable("LP_data", "f4", ("LP_nnz",), zlib=True)[:] = L.data
+                model_grp.createVariable("LP_indices", "i4", ("LP_nnz",), zlib=True)[:] = L.indices
+                model_grp.createVariable("LP_indptr", "i4", ("ncols_plus_1",), zlib=True)[:] = L.indptr
+                model_grp.LP_shape = L.shape
+                model_grp.createVariable('PP', "i4", ('m',), zlib=True)[:] = self.factorP.P()
+                
+                
+                # Spline group
+                spline_grp.kt = self.k
+                spline_grp.nkt = self.nk
+                spline_grp.kt = self.kt
+                spline_grp.nkt = self.nkt
+
 #%% Solver class
     
 class Solver():

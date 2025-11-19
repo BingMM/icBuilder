@@ -9,20 +9,20 @@ import matplotlib.pyplot as plt
 from polplot import pp
 import matplotlib.gridspec as gridspec
 from tqdm import tqdm
+from pathlib import Path
+from os.path import join as pjoin
 
 #%% Paths
 
-base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-#base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
-#base = '/disk/IMAGE_FUV/fuv/'
+base = pjoin(Path(__file__).resolve().parents[1], 'example_data')
 
-p_wic_nc = base + 'wic/'
-p_s12_nc = base + 's12/'
-p_s13_nc = base + 's13/'
+p_wic_nc = pjoin(base, 'wic')
+p_s12_nc = pjoin(base, 's12')
+p_s13_nc = pjoin(base, 's13')
 
-p_wic_out = base + 'figures/wic_br/'
-p_s12_out = base + 'figures/s12_br/'
-p_s13_out = base + 'figures/s13_br/'
+p_wic_out = pjoin(base, 'figures', 'wic_br')
+p_s12_out = pjoin(base, 'figures', 's12_br')
+p_s13_out = pjoin(base, 'figures', 's13_br')
 
 #%% Fetch orbits available in all nc files
 
@@ -36,15 +36,15 @@ o_s13 = [int(o[-7:-3]) for o in sorted(glob.glob(p_s13_nc + '*.nc'))]
 def plot_br(inpath, outpath, orbits, sensor):
     for orbit in tqdm(orbits, total=len(orbits), desc=sensor):
         # Load nc orbit file for sensor
-        so = xr.open_dataset(inpath + sensor + '_or' + str(orbit).zfill(4) + '.nc').copy()
+        so = xr.open_dataset(pjoin(inpath, sensor, '_or' + str(orbit).zfill(4) + '.nc')).copy()
         # Make folder
-        foldername = outpath + 'or_' + str(orbit).zfill(4)
+        foldername = pjoin(outpath, 'or_' + str(orbit).zfill(4))
         os.makedirs(foldername, exist_ok=True)
         print(foldername)
         # Loop over each date        
         for i in range(so.dims['date']):
             s = so.isel(date=i)
-            figname = foldername + '/t' + str(i).zfill(3) + '.png'
+            figname = pjoin(foldername, '/t' + str(i).zfill(3) + '.png')
             make_plot(s, sensor, figname)
 
 def make_plot(s, sensor, figname):
