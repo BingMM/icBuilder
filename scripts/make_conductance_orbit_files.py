@@ -122,8 +122,7 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     cI = ConductanceImage(wic_bI, s12_bI, s13_bI, time=t)
         # Save to netCDF
     out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
-    #cI.to_nc(out_path)
-    cI.to_nc_new(out_path)
+    cI.to_nc(out_path)
     return orbit  # Success
     #except Exception as e:
     #    print(f"Failed orbit {orbit}: {e}")
@@ -172,10 +171,14 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 parser = argparse.ArgumentParser(description="Process FUV data.")
+parser.add_argument('--parallel', type=str2bool, default=False, help='Run in parallel (default False)')
+parser.add_argument('--pool_size', type=int, default=96, help='Size of pool (default 10)')
 parser.add_argument('--base', type=str,
                     default=str(pjoin(Path(__file__).resolve().parents[1], 'example_data')),
                     help='Base data directory')
 
+parallel = parser.parse_args().parallel
+pool_size = parser.parse_args().pool_size
 base = parser.parse_args().base
 
 p_wic_nc = pjoin(base, 'wic')
@@ -230,7 +233,6 @@ print('Coarse grid resolution is : ' + str(grid_s.Lres/1e3) + ' km\n')
 
 #%%
 
-results = run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, parallel=False)
-#results = run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, parallel=True, n_processes=96)
+results = run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, parallel=parallel, n_processes=pool_size)
 
 

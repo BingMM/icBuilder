@@ -164,7 +164,7 @@ class ConductanceImage:
 
         self.w = (self.wic_w + self.s12_w + self.s13_w)/3
 
-    def to_nc_new(self, filename: str):
+    def to_nc(self, filename: str):
         """
         Save conductance image to a NetCDF4 file.
         Can be read/rebuilt using the icReader library.
