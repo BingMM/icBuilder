@@ -9,10 +9,19 @@ from polplot import pp
 from tqdm import tqdm
 from pathlib import Path
 from icreader import ConductanceImage
+import argparse
+
+#%% Argument parsing
+
+parser = argparse.ArgumentParser(description="Base path.")
+parser.add_argument('--base', type=str,
+                    default=str(pjoin(Path(__file__).resolve().parents[1], 'example_data')),
+                    help='Base data directory')
+args = parser.parse_args()
 
 #%% Paths
 
-base = pjoin(Path(__file__).resolve().parents[1], 'example_data')
+base = args.base
 
 p_in  = pjoin(base, 'conductance')
 p_out = pjoin(base, 'figures', 'conductance')
