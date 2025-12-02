@@ -13,6 +13,7 @@ from tqdm.contrib.concurrent import process_map  # tqdm-compatible multiprocessi
 from functools import partial
 from icbuilder import PreImage, BinnedImage, ConductanceImage
 import argparse
+from apexpy.helpers import subsol
 
 #%% Fun
 
@@ -51,15 +52,20 @@ def find_common_times_with_indices(list1, list2, list3, tolerance=timedelta(seco
     
     return np.array(common_times), np.array(indices)
 
-def safe_apex_convert(apex, glat_row, glon_row, height=110):
+def safe_apex_convert(apex, ti, glat_row, glon_row, height=110):
     valid = ~np.isnan(glat_row) & ~np.isnan(glon_row)
     mlat = np.full_like(glat_row, np.nan)
     mlon = np.full_like(glon_row, np.nan)
+    mlt  = np.full_like(glon_row, np.nan)
     if np.any(valid):
         mlat_valid, mlon_valid = apex.convert(glat_row[valid], glon_row[valid], 'geo', 'apex', height=height)
         mlat[valid] = mlat_valid
         mlon[valid] = mlon_valid
-    return mlat, mlon
+        
+        ssglat, ssglon = subsol(ti)
+        _, ssalon = apex.geo2apex(ssglat, ssglon, 318550)
+        mlt[valid] = (180 + np.float64(mlon_valid) - ssalon) / 15 % 24
+    return mlat, mlon, mlt, ssalon
 
 def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_thres=0.1):
     #try:
@@ -100,9 +106,9 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
         # APEX conversion
     for i, ti in enumerate(t):
         apex = apexpy.Apex(ti)
-        wic_pI.mlat[i], wic_pI.mlon[i] = safe_apex_convert(apex, wic_pI.glat[i], wic_pI.glon[i])
-        s12_pI.mlat[i], s12_pI.mlon[i] = safe_apex_convert(apex, s12_pI.glat[i], s12_pI.glon[i])
-        s13_pI.mlat[i], s13_pI.mlon[i] = safe_apex_convert(apex, s13_pI.glat[i], s13_pI.glon[i])
+        wic_pI.mlat[i], wic_pI.mlon[i], wic_pI.mlt[i], wic_pI.ssalon[i] = safe_apex_convert(apex, ti, wic_pI.glat[i], wic_pI.glon[i])
+        s12_pI.mlat[i], s12_pI.mlon[i], s12_pI.mlt[i], s12_pI.ssalon[i] = safe_apex_convert(apex, ti, s12_pI.glat[i], s12_pI.glon[i])
+        s13_pI.mlat[i], s13_pI.mlon[i], s13_pI.mlt[i], s13_pI.ssalon[i] = safe_apex_convert(apex, ti, s13_pI.glat[i], s13_pI.glon[i])
 
         # Fullness check
     wic_p = wic_pI.percent_full(grid_w)

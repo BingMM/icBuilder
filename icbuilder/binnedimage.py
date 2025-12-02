@@ -63,9 +63,12 @@ class BinnedImage:
         self.sigma = np.full_like(self.counts, np.nan)
         self.w = np.full_like(self.counts, np.nan)
         self.shape = self.counts.shape
+        self.ssalon = pI.ssalon
         
         for i in range(time_len):
-            lat, lon = pI.get_mcoords(i) # Get magnetic coordinates
+            #lat, lon = pI.get_mcoords(i) # Get magnetic coordinates
+            lat, _, mlt, _ = pI.get_mcoords(i) # Get magnetic coordinates
+            lon = mlt*15
             f = grid.ingrid(lon, lat) # Find data inside the CS grid
             self.counts[i] = grid.count(lon[f], lat[f]) # Count the number of pixels in each bin
 

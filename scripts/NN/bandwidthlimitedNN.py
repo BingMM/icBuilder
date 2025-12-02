@@ -127,7 +127,7 @@ class SpectralINR(nn.Module):
 # Define constraints
 S_DOMAIN = 8000
 S_RES = 400     # Max 20 cycles
-T_DOMAIN = 38
+T_DOMAIN = 308
 T_RES = 30       # Max 125 cycles
 
 model = SpectralINR(S_DOMAIN, S_RES, T_DOMAIN, T_RES)
@@ -142,7 +142,7 @@ from icreader import ConductanceImage
 from copy import deepcopy as dcopy
 
 base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-orbit_file = 'or_0085.nc'
+orbit_file = 'or_0099.nc'
 conductance_file = pjoin(base, 'conductance', orbit_file)
 spline_file = pjoin(base, 'spline', orbit_file)
 
@@ -181,7 +181,7 @@ vals = torch.FloatTensor(z_flat[:, None])
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 print("\nTraining on Signal exceeding resolution limit...")
-for i in range(5000):
+for i in range(4000):
     optimizer.zero_grad()
     preds = model(coords)
     loss = nn.MSELoss()(preds, vals)
@@ -197,14 +197,16 @@ cp = torch.FloatTensor(np.stack([X_grid.flatten(), Y_grid.flatten(), T_grid.flat
 with torch.no_grad():
     pred_y = model(cp).numpy().flatten().reshape(Z_true.shape)
 
+start = 100
 ncol = 10
 fig, axes = plt.subplots(2, ncol, figsize=(ncol*16, 2*16))
 for i in range(ncol):
-    vmax = np.nanmax(abs(Z_true[i]))
-    masked_view = np.ma.array(Z_true[i], mask=np.isnan(Z_true[i]))
+    ii = start + i
+    vmax = np.nanmax(abs(Z_true[ii]))
+    masked_view = np.ma.array(Z_true[ii], mask=np.isnan(Z_true[ii]))
     axes[0, i].imshow(masked_view, cmap='bwr', vmin=-vmax, vmax=vmax)
         
-    masked_view = np.ma.array(pred_y[i], mask=np.isnan(Z_true[i]))
+    masked_view = np.ma.array(pred_y[ii], mask=np.isnan(Z_true[ii]))
     axes[1, i].imshow(masked_view, cmap='bwr', vmin=-vmax, vmax=vmax)
 
 for ax in axes.flatten():

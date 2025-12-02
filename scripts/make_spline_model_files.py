@@ -8,18 +8,20 @@ import matplotlib.pyplot as plt
 #%% Paths
 
 base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-orbit_file = 'or_0085.nc'
+orbit = 99
+orbit_file = f'or_{str(orbit).zfill(4)}.nc'
 conductance_file = pjoin(base, 'conductance', orbit_file)
 spline_file = pjoin(base, 'spline', orbit_file)
 
 #%% Load condutance image
 
 cI = ConductanceImage(conductance_file)
+#cI.discard(interval=(50, 210))
 
 #%% Make spline image
 
-sI = SplineImage(cI, ncp = 20, cpt_step = 5, lH = -3, lP=-1, wscaling=True, kt=2)
-
+#sI = SplineImage(cI, ncp = 30, cpt_step = 3, lH = -4.5, lP=-1, wscaling=True, kt=2)
+sI = SplineImage(cI, ncp = 40, cpt_step = 2, lH = -6, lP=-1, wscaling=True, kt=2)
 
 #%%%
 
@@ -62,8 +64,7 @@ U, s, Vh = svds(sI.Gt, k=sI.Gt.shape[1]-1)
 
 #%%
 
-
-idx = 5
+idx = 100
 fig, axs = plt.subplots(2, 8, figsize=(16,4))
 for i in range(8):
     axs[0, i].imshow(cI.dH[idx+i], vmin=0, vmax=75)
@@ -71,12 +72,11 @@ for i in range(8):
 
 #%% 
 
-sI = SplineImage(cI, ncp = 30, cpt_step = 3, lH = -3, lP=-1, wscaling=True, kt=3)
+sI = SplineImage(cI, ncp = 40, cpt_step = 2, lH = -3, lP=-1, wscaling=True, kt=3)
 
 #%%
 
-#idx = 100
-idx = 5
+idx = 100
 fig, axs = plt.subplots(2, 8, figsize=(16,4))
 for i in range(8):
     axs[0, i].imshow(cI.H[idx+i], vmin=0, vmax=75)
@@ -84,16 +84,16 @@ for i in range(8):
 
 #%%
 
-#idx = 100
-idx = 5
+idx = 200 - 50
+idx = 100
 fig, axs = plt.subplots(6, 8, figsize=(16,12))
 for i in range(8):
     axs[0, i].imshow(sI.H[idx+i], vmin=0, vmax=75)
     axs[1, i].imshow(sI.pH[idx+i], vmin=0, vmax=75)
     axs[2, i].imshow(sI.dH[idx+i], vmin=0, vmax=75)
-    axs[3, i].imshow(sI.pdH[idx+i], vmin=0, vmax=10)
-    axs[4, i].imshow(sI.pdH_m[idx+i], vmin=0, vmax=10)
-    axs[5, i].imshow(sI.LTL_diag.reshape((sI.ncp, sI.ncp, sI.ncpt))[:, :, int(sI.tknots.size * (idx+i)/sI.nt)].T, vmin=0, vmax=1)    
+    #axs[3, i].imshow(sI.pdH[idx+i], vmin=0, vmax=10)
+    #axs[4, i].imshow(sI.pdH_m[idx+i], vmin=0, vmax=10)
+    #axs[5, i].imshow(sI.LTL_diag.reshape((sI.ncp, sI.ncp, sI.ncpt))[:, :, int(sI.tknots.size * (idx+i)/sI.nt)].T, vmin=0, vmax=1)    
 
 #%%
 

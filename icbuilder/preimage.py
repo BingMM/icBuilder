@@ -22,6 +22,8 @@ class PreImage:
         Magnetic latitude coordinates [time, y, x].
     mlon : np.ndarray
         Magnetic longitude coordinates [time, y, x].
+    mlt : np.ndarray
+        Magnetic local times [time, y, x].
     glat : np.ndarray
         Geographic latitude coordinates [time, y, x].
     glon : np.ndarray
@@ -40,6 +42,8 @@ class PreImage:
         Shape of the image arrays.
     index : Optional[list[int] or np.ndarray]
         Indices of time frames loaded.
+    ssalon : np.ndarray
+        Apex longitude of the subsolar point at each time.
     """
 
     def __init__(self,
@@ -57,13 +61,14 @@ class PreImage:
         """
         self.index = index
 
-        var_names = ['mlat', 'mlon', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']
+        var_names = ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']
         for name in var_names:
             var_data = ncdf.variables[name]
             data = var_data[...] if index is None else var_data[index, :, :]
             setattr(self, name, np.copy(data))
 
         self.shape = self.mlat.shape
+        self.ssalon = np.full(self.shape[0], np.nan)
 
     def get_img(self, i: int) -> NDArray[np.float64]:
         """
@@ -175,7 +180,7 @@ class PreImage:
         tuple of np.ndarray
             (magnetic latitude, magnetic longitude)
         """
-        return self.mlat[i, :, :], self.mlon[i, :, :]
+        return self.mlat[i, :, :], self.mlon[i, :, :], self.mlt[i, :, :], self.ssalon[i]
 
     def get_gcoords(self, i: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """
@@ -203,8 +208,10 @@ class PreImage:
         f : list[int] or np.ndarray
             Indices of frames to retain.
         """
-        for name in ['mlat', 'mlon', 'glat', 'glon', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']:
+        for name in ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']:
             setattr(self, name, getattr(self, name)[f, :, :])
+        
+        self.ssalon = self.ssalon[f]
 
         self.shape = self.mlat.shape
 
@@ -224,7 +231,9 @@ class PreImage:
         """
         counts = np.zeros((self.shape[0], grid.shape[0], grid.shape[1]))
         for i in range(self.shape[0]):
-            mlat, mlon = self.get_mcoords(i)
+            #mlat, mlon = self.get_mcoords(i)
+            mlat, _, mlt, _ = self.get_mcoords(i)
+            mlon = mlt*15
             f = grid.ingrid(mlon, mlat)
             counts[i] = grid.count(mlon[f], mlat[f])
         f = counts != 0

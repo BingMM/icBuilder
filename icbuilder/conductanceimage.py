@@ -38,6 +38,7 @@ class ConductanceImage:
         P, H    : Pedersen and Hall conductance [mho].
         dP, dH  : Uncertainty based on error propagation [mho].
         dP2, dH2: Alternative uncertainty.
+        ssalon : Apex magnetic longitude of subsolar point
     """
 
     def __init__(
@@ -74,6 +75,7 @@ class ConductanceImage:
             raise ValueError('wic, s12, and s13 have to have the same shape.')
 
         self.time = time
+        self.ssalon = dcopy(wic.ssalon)
         self.Ep = Ep
         self.dEp = dEp
         self.grid = dcopy(wic.grid)
@@ -210,6 +212,9 @@ class ConductanceImage:
                 vtime = nc.createVariable("time", "i4", ("time",))
                 vtime[:] = time_seconds
                 nc.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
+    
+            ssalon = nc.createVariable("ssalon", "f4", ("time",))
+            ssalon[:] = self.ssalon
     
             # Grid GROUP
             grid_grp = nc.createGroup("grid")

@@ -94,7 +94,7 @@ from icreader import ConductanceImage
 from copy import deepcopy as dcopy
 
 base = '/home/bing/Dropbox/work/code/repos/icBuilder/example_data/'
-orbit_file = 'or_0085.nc'
+orbit_file = 'or_0099.nc'
 conductance_file = pjoin(base, 'conductance', orbit_file)
 spline_file = pjoin(base, 'spline', orbit_file)
 
@@ -140,9 +140,9 @@ values_tensor = torch.FloatTensor(train_values)
 # Define your constraints
 model = ResolutionConstrainedINR(
     spatial_domain=8000,    # km
-    spatial_res=2*2000,        # km (Wavelength) (2*resolution)
-    temporal_domain=38,    # min
-    temporal_res=2*100,         # min (Wavelength) (2*resolution)
+    spatial_res=2*250,        # km (Wavelength) (2*resolution)
+    temporal_domain=308,    # min
+    temporal_res=2*3,         # min (Wavelength) (2*resolution)
     hidden_features=256,
     hidden_layers=3
 )
@@ -151,7 +151,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 print("\nTraining Check...")
 losses = []
-for i in range(4000):
+for i in range(30000):
     optimizer.zero_grad()
     preds = model(coords_tensor)
     loss = nn.MSELoss()(preds, values_tensor)
@@ -170,15 +170,17 @@ x_new = np.linspace(x.min(), x.max(), res)
 y_new = np.linspace(y.min(), y.max(), res)
 Y_new, X_new = np.meshgrid(y_new, x_new)
 
+start = 100
 ncol = 10
 fig, axes = plt.subplots(2, ncol, figsize=(ncol*16, 2*16))
 for i in range(ncol):
-    input_slice = Z_sparse[i]
+    ii = start + i
+    input_slice = Z_sparse[ii]
     vmax = np.nanmax(abs(input_slice))
     masked_view = np.ma.array(input_slice, mask=np.isnan(input_slice))
     axes[0, i].imshow(masked_view, cmap='bwr', vmin=-vmax, vmax=vmax)
     
-    T_new = np.ones_like(X_new)*t[i]
+    T_new = np.ones_like(X_new)*t[ii]
     flat_coords = np.stack([X_new.flatten(), Y_new.flatten(), T_new.flatten()], axis=1)
     input_tensor = torch.FloatTensor(flat_coords).requires_grad_(True)
     #pred_values, coords_grad = model(input_tensor)

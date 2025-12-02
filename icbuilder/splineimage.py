@@ -122,6 +122,10 @@ class SplineImage():
     def reset_reg(self):
         self._LTL_diag = None
         self._LTL = None
+        self._tLTL = None
+        self._xLTL = None
+        self._yLTL = None
+        self._sLTL = None
 
     @property
     def LTL_diag(self):
@@ -139,11 +143,70 @@ class SplineImage():
             self._LTL = sp.diags(self.LTL_diag, format='csr')
         return self._LTL
     
+    @property
+    def tLTL(self):        
+        if self._tLTL is None:
+            Gt = []
+            BS = BSpline(self.tknots, np.eye(self.ncpt), self.kt)
+            for i, ti in enumerate(self.t):
+                Gt_ = sp.csr_matrix(BS(ti, nu=1))
+                Gt_ = kron(np.eye(self.G.shape[1]), Gt_, format='csr')  # Ensure sparse output
+                Gt.append(self.G @ Gt_)  # Matrix multiplication remains sparse
+            Gt = vstack(Gt, format='csr')
+            self._tLTL = Gt.T@Gt
+            self._tLTL /= np.median(self._tLTL.diagonal())
+        return self._tLTL
+    
+    @property
+    def xLTL(self):        
+        if self._xLTL is None:
+            self._xLTL, self._yLTL = self.get_xyLTL()
+        return self._xLTL
+    
+    @property
+    def yLTL(self):        
+        if self._yLTL is None:
+            self._xLTL, self._yLTL = self.get_xyLTL()
+        return self._yLTL
+
+    def get_xyLTL(self):
+        Gx = np.zeros((self.x.size, self.ncp**2))
+        Gy = np.zeros((self.x.size, self.ncp**2))
+        for i, (xi, yi) in enumerate(zip(self.x.flatten(), self.y.flatten())):
+            Gx[i, :] = self.splx(xi, nu=1).dot(np.kron(np.eye(self.ncp), self.sply(yi)))
+            Gy[i, :] = self.splx(xi).dot(np.kron(np.eye(self.ncp), self.sply(yi, nu=1)))            
+        Gx, Gy = csc_matrix(Gx), csc_matrix(Gy)
+        
+        Gtx, Gty = [], []
+        for i, ti in enumerate(self.t):
+            Gti = kron(np.eye(Gx.shape[1]), self.splt(ti), format='csr')            
+            Gtx.append(Gx @ Gti)
+            Gty.append(Gy @ Gti)
+        Gtx, Gty = vstack(Gtx, format='csr'), vstack(Gty, format='csr')
+        
+        return Gtx.T@Gtx, Gty.T@Gty
+    
+    @property
+    def sLTL(self):
+        if self._sLTL is None:
+            self._sLTL = self.xLTL + self.yLTL
+            self._sLTL /= np.median(self._sLTL.diagonal())
+        return self._sLTL
+    
+    #@property
+    #def LTL(self):
+    #    if self._LTL is None:
+    #        self._LTL = self.sLTL + self.tLTL
+    #    return self._LTL
+            
+    
 #%% Spline
 
     def reset_spline(self):
         self._G = None
         self._Gt = None
+        self._splx = None
+        self._splt = None
 
     @property
     def nk(self):
@@ -162,6 +225,22 @@ class SplineImage():
         return np.r_[[self.t.min()]*self.kt, np.linspace(self.t.min(), self.t.max(), self.nkt-2*self.kt), [self.t.max()]*self.kt]
 
     @property
+    def splx(self):
+        if self._splx is None:
+            self._splx = BSpline(self.knots, np.eye(self.ncp), self.k)
+        return self._splx
+    
+    @property
+    def sply(self):
+        return self._splx
+    
+    @property
+    def splt(self):
+        if self._splt is None:
+            self._splt = BSpline(self.tknots, np.eye(self.ncpt), self.kt)
+        return self._splt
+
+    @property
     def G(self):
         if self._G is None:
             self._G = self.generate_G_2d(return_sparse=True)
@@ -172,16 +251,11 @@ class SplineImage():
         if self._Gt is None:
             self._Gt = self.generate_G_3d()
         return self._Gt
-        
+    
     def generate_G_2d(self, return_sparse=False):
-        # Note optimized given the repeated values in x and y
-        # TODO: A look-up table should be used
         G = np.zeros((self.x.size, self.ncp**2))
         for i, (xi, yi) in enumerate(zip(self.x.flatten(), self.y.flatten())):
-            Gx = BSpline.design_matrix(xi, self.knots, self.k).todense()
-            Gy = BSpline.design_matrix(yi, self.knots, self.k).todense()
-            Gy = np.kron(np.eye(self.ncp), Gy)
-            G[i, :] = Gx.dot(Gy)
+            G[i, :] = self.splx(xi).dot(np.kron(np.eye(self.ncp), self.sply(yi)))
         if return_sparse:
             return csc_matrix(G)
         return G
@@ -189,9 +263,7 @@ class SplineImage():
     def generate_G_3d(self):
         Gt = []
         for i, ti in enumerate(self.t):
-            Gt_ = BSpline.design_matrix(ti, self.tknots, self.kt)  # Already sparse
-            Gt_ = kron(np.eye(self.G.shape[1]), Gt_, format='csr')  # Ensure sparse output
-            Gt.append(self.G @ Gt_)  # Matrix multiplication remains sparse
+            Gt.append(self.G @ kron(np.eye(self.G.shape[1]), self.splt(ti), format='csr'))
         return vstack(Gt, format='csr')  # Efficient sparse stacking
 
 #%% Models
@@ -302,92 +374,51 @@ class SplineImage():
         if self._pdP is None:
             self._pdP = self.ev_uncertainty(comp='pedersen')
         return self._pdP
-    
-    def ev_uncertainty_old(self, comp='hall', block=2000):
-        C = self.CH if comp == 'hall' else self.CP
         
-        diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
-    
-        blocks = range(0, self.Gt.shape[0], block)
-        loop = tqdm(blocks, total=len(blocks), desc=f'Chunked computation of {comp} uncertainty')
-        for start in loop:
-            end = min(start + block, self.Gt.shape[0])
-            Gblock = self.Gt[start:end]                 # (B × n) CSR
-            
-            V = C @ Gblock.T                     # (n × B) CSC
-            diag_elements[start:end] = np.sum(Gblock.multiply(V.T), axis=1).A.ravel()
-        
-        return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
-    
-    def ev_uncertainty(self, comp='hall', block=2000):
+    def ev_uncertainty(self, comp='hall', n_samples=5000):
         """
-        Compute sqrt(diag(G Cp G^T)) without forming Cp.
-        Uses CHOLMOD triangular solves instead of explicit posterior covariance.
+        Fast stochastic estimation of the posterior variance.
+        Uses Hutchinson's trace estimator (Rademacher probing).
+        
+        Parameters
+        ----------
+        comp : str
+            'hall' or 'pedersen'
+        n_samples : int
+            Number of random probe vectors. 
+            30 is fast/rough, 100 is very accurate.
         """
-        factor = self.factorH if comp == 'hall' else self.factorP    # Cholesky object
-    
-        diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
-    
-        blocks = range(0, self.Gt.shape[0], block)
-        loop = tqdm(blocks, total=len(blocks), desc=f'Chunked computation of {comp} uncertainty')    
-        for start in loop:
-            end = min(start + block, self.Gt.shape[0])
-    
-            # Grab block of rows (B × nmodel)
-            Gblock = self.Gt[start:end]
-    
-            # Solve Λ X = Gblock.T  →  X = Cp @ Gblock.T
-            # This gives an (nmodel × B) matrix
-            Y = factor.solve_L(Gblock.T)
-            X = factor.solve_Lt(Y)
-                        
-            #X = factor.solve_A(Gblock.T)     # batched triangular solve
-    
-            # diag(G Cp G^T)_{i} = sum_j G[i,j] * X[j,i]
-            # X.T has same shape as Gblock
-            diag_elements[start:end] = np.sum(Gblock.multiply(X.T), axis=1).A.ravel()
-    
-        return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
-
-
-    '''
-    def ev_uncertainty(self, comp='hall', block=1000):
-        factor = self.solverH.factor if comp == 'hall' else self.solverP.factor
+        factor = self.factorH if comp == 'hall' else self.factorP
         
-        diag_elements = np.zeros(self.Gt.shape[0], dtype=float)
+        # Dimensions
+        n_data = self.Gt.shape[0]  # Total pixels in movie
         
-        import scipy.sparse
+        # 1. Generate Rademacher vectors (+1 or -1)
+        # Shape: (n_data_points, n_samples)
+        # We process all samples at once or in batches if memory is tight
+        print(f"Estimating {comp} uncertainty with {n_samples} stochastic probes...")
+        z = np.random.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, n_samples))
         
-        blocks = range(0, self.Gt.shape[0], block)
-        loop = tqdm(blocks, total=len(blocks), desc=f'Chunked computation of {comp} uncertainty')
+        # 2. Project random vectors to model space: v = G.T @ z
+        # This uses the sparse matrix transpose
+        v = self.Gt.T.dot(z)
         
-        for start in loop:
-            end = min(start + block, self.Gt.shape[0])
-            
-            # Get block of rows as dense (if sparse enough) or keep sparse
-            Gblock = self.Gt[start:end]  # (block × n)
-            
-            # Build RHS matrix: each column corresponds to one row of Gblock
-            # We need to solve C^(-1) @ V = Gblock.T, so V = C @ Gblock.T
-            if Gblock.nnz / Gblock.size < 0.01:  # Very sparse
-                # Convert to dense for batch solving
-                RHS = Gblock.T.toarray()  # (n × block)
-            else:
-                RHS = Gblock.T.tocsc()  # Keep sparse in CSC format
-            
-            # Solve all systems at once - this is the key optimization
-            V = factor.solve_A(RHS)  # (n × block)
-            
-            # Extract diagonals efficiently
-            if scipy.sparse.issparse(V):
-                V = V.toarray()
-            
-            # Compute g_i @ v_i for each i in block
-            diag_block = np.sum(Gblock.toarray() * V.T, axis=1)
-            diag_elements[start:end] = diag_block
+        # 3. Solve in model space: u = A^-1 @ v
+        # sksparse can solve for multiple RHS vectors at once efficiently
+        u = factor.solve_A(v)
         
-        return np.sqrt(diag_elements).reshape((self.nt, self.n, self.n))
-    '''
+        # 4. Project back to data space: w = G @ u
+        w = self.Gt.dot(u)
+        
+        # 5. Estimate diagonal: mean(z * w)
+        # element-wise multiplication followed by mean across the random samples
+        # Since z is +/- 1, dividing by z is the same as multiplying by z
+        diag_estimates = np.mean(z * w, axis=1)
+        
+        # Clip negative values (numerical noise around 0) and sqrt
+        uncertainty = np.sqrt(np.maximum(diag_estimates, 0))
+        
+        return uncertainty.reshape((self.nt, self.n, self.n))
 
     @property
     def pdH_m(self):
@@ -404,73 +435,6 @@ class SplineImage():
 
 #%% Save image
     
-    def to_nc_old(self, filename: str):
-            """
-            Save spline image to a NetCDF file.
-            Can be read/rebuilt using the icReader library.
-    
-            Parameters
-            ----------
-            filename : str
-                Full path to output NetCDF file.
-            """
-            with netcdf_file(filename, 'w') as nc:
-                t, y, x = self.nt, self.n, self.n
-                nc.createDimension('time', t)
-                nc.createDimension('dim1', y)
-                nc.createDimension('dim2', x)
-    
-                nc.createVariable('H',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pH
-                nc.createVariable('P',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pP
-                nc.createVariable('dH', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
-                nc.createVariable('dP', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
-    
-                if self.time is not None:
-                    ref_time = datetime(2000, 1, 1)
-                    time_seconds = np.array([(t - ref_time).total_seconds() for t in self.time], dtype=np.int32)
-                    nc.createVariable("time", np.int32, ("time",))[:] = time_seconds
-                    nc.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
-    
-                if self.grid and hasattr(self.grid, "projection"):
-                    nc.position     = self.grid.projection.position.astype(float)
-                    nc.orientation  = self.grid.projection.orientation
-                    nc.L    = self.grid.L
-                    nc.W    = self.grid.W
-                    nc.Lres = self.grid.Lres
-                    nc.Wres = self.grid.Wres
-                    nc.gridR    = self.grid.R
-
-                nc.createDimension('m', self.mH.size)
-                
-                nc.createVariable('mH', 'f8', ('m',))[:] = self.mH
-                nc.createVariable('mP', 'f8', ('m',))[:] = self.mP
-                                
-                L = self.factorH.L()
-                nc.createDimension('LH_nnz', L.nnz)
-                nc.createDimension('ncols_plus_1', self.mH.size+1)
-                nc.createVariable("LH_data", "f4", ("LH_nnz",))[:] = L.data
-                nc.createVariable("LH_indices", "i4", ("LH_nnz",))[:] = L.indices
-                nc.createVariable("LH_indptr", "i4", ("ncols_plus_1",))[:] = L.indptr
-                nc.LH_shape = L.shape
-                nc.createVariable('PH', "i4", ('m',))[:] = self.factorH.P()
-                
-                L = self.factorP.L()
-                nc.createDimension('LP_nnz', L.nnz)
-                nc.createVariable("LP_data", "f4", ("LP_nnz",))[:] = L.data
-                nc.createVariable("LP_indices", "i4", ("LP_nnz",))[:] = L.indices
-                nc.createVariable("LP_indptr", "i4", ("ncols_plus_1",))[:] = L.indptr
-                nc.LP_shape = L.shape
-                nc.createVariable('PP', "i4", ('m',))[:] = self.factorP.P()
-                            
-                nc.kt = self.k
-                nc.nkt = self.nk
-                nc.kt = self.kt
-                nc.nkt = self.nkt
-                
-                nc.createDimension('g1', x*y)
-                nc.createDimension('g2', self.G.shape[1])
-                nc.createVariable('G', float, ('g1', 'g2'))[:] = self.G.todense()
-
     def to_nc(self, filename: str):
             """
             Save spline image to a NetCDF4 file.
