@@ -7,7 +7,6 @@ from scipy.sparse import kron, vstack, csc_matrix
 import scipy.sparse as sp
 from icreader import ConductanceImage
 from sksparse.cholmod import cholesky 
-from scipy.io import netcdf_file
 from datetime import datetime
 from tqdm import tqdm
 from netCDF4 import Dataset
@@ -23,7 +22,8 @@ class SplineImage():
                  kt: Optional[int] = 2,
                  lH: Optional[int] = 0,
                  lP: Optional[int] = 0,
-                 wscaling: Optional[bool] = False):
+                 wscaling: Optional[bool] = False,
+                 psamp: Optional[int] = 5000):
         
         self.cI = cI                 
         
@@ -35,6 +35,7 @@ class SplineImage():
         self.lH = lH
         self.lP = lP
         self.wscaling = wscaling
+        self.psamp = psamp
 
         self.reset_time()
         self.reset_spline()
@@ -131,8 +132,12 @@ class SplineImage():
     def LTL_diag(self):
         if self._LTL_diag is None:
             if self.wscaling:
-                self._LTL_diag = self.Gt.T.dot(self.w.flatten()) / self.Gt.T.dot(np.ones(self.Gt.shape[0]))
-                self._LTL_diag /= np.max(self._LTL_diag)
+                numerator = self.Gt.T.dot(self.w.flatten())
+                denominator = self.Gt.T.dot(np.ones(self.Gt.shape[0]))
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    self._LTL_diag = numerator / denominator
+                self._LTL_diag /= np.nanmax(self._LTL_diag)
+                self._LTL_diag[np.isnan(self._LTL_diag)] = 1
             else:
                 self._LTL_diag = np.ones(self.Gt.shape[1])
         return self._LTL_diag
@@ -375,7 +380,7 @@ class SplineImage():
             self._pdP = self.ev_uncertainty(comp='pedersen')
         return self._pdP
         
-    def ev_uncertainty(self, comp='hall', n_samples=5000):
+    def ev_uncertainty(self, comp='hall'):
         """
         Fast stochastic estimation of the posterior variance.
         Uses Hutchinson's trace estimator (Rademacher probing).
@@ -396,8 +401,8 @@ class SplineImage():
         # 1. Generate Rademacher vectors (+1 or -1)
         # Shape: (n_data_points, n_samples)
         # We process all samples at once or in batches if memory is tight
-        print(f"Estimating {comp} uncertainty with {n_samples} stochastic probes...")
-        z = np.random.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, n_samples))
+        #print(f"Estimating {comp} uncertainty with {n_samples} stochastic probes...")
+        z = np.random.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, self.psamp))
         
         # 2. Project random vectors to model space: v = G.T @ z
         # This uses the sparse matrix transpose
@@ -470,7 +475,9 @@ class SplineImage():
                     time_seconds = np.array([(t - ref_time).total_seconds() for t in self.time], dtype=np.int32)
                     data_grp.createVariable("time", np.int32, ("time",))[:] = time_seconds
                     data_grp.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
-    
+                
+                data_grp.createVariable("ssalon", 'f8', ('time,'))[:] = self.cI.ssalon
+                
                 # Grid group
                 if self.grid and hasattr(self.grid, "projection"):
                     grid_grp.position     = self.grid.projection.position.astype(float)
@@ -480,7 +487,6 @@ class SplineImage():
                     grid_grp.Lres = self.grid.Lres
                     grid_grp.Wres = self.grid.Wres
                     grid_grp.gridR    = self.grid.R
-
                 
                 # Model group
                 model_grp.createDimension('m', self.mH.size)
@@ -578,7 +584,6 @@ class Solver():
     def GT(self):
         if self._GT is None:
             self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])**2) # Sparse multiplication
-            #self._GT = self.G[self.f].T.multiply(1/(self.q[self.f])) # Sparse multiplication
         return self._GT
     
     @property
