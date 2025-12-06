@@ -22,7 +22,7 @@ events = np.array([[179, 24, 157],
 
 #%% Paths
 
-base = '/home/bing/Dropbox/work/data/conductance/'
+base = '/home/bing/Dropbox/work/data/IMAGE_FUV/conductance/'
 
 #%%
 

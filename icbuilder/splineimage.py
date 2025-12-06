@@ -294,6 +294,7 @@ class SplineImage():
     
     @property
     def factord(self):
+        # TODO: This needs to be fixed, maybe
         if self._factord is None:
             self._factord = Solver(self.Gt, l=1e-5).factor
         return self._factord
@@ -440,7 +441,7 @@ class SplineImage():
 
 #%% Save image
     
-    def to_nc(self, filename: str):
+    def spline_to_nc(self, filename: str):
             """
             Save spline image to a NetCDF4 file.
             Can be read/rebuilt using the icReader library.
@@ -476,7 +477,7 @@ class SplineImage():
                     data_grp.createVariable("time", np.int32, ("time",))[:] = time_seconds
                     data_grp.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
                 
-                data_grp.createVariable("ssalon", 'f8', ('time,'))[:] = self.cI.ssalon
+                data_grp.createVariable("ssalon", 'f8', ('time',))[:] = self.cI.ssalon
                 
                 # Grid group
                 if self.grid and hasattr(self.grid, "projection"):
@@ -490,33 +491,50 @@ class SplineImage():
                 
                 # Model group
                 model_grp.createDimension('m', self.mH.size)
-                model_grp.createDimension('ncols_plus_1', self.mH.size+1)
+                #model_grp.createDimension('ncols_plus_1', self.mH.size+1)
                 
                 model_grp.createVariable('mH', 'f8', ('m',), zlib=True)[:] = self.mH
                 model_grp.createVariable('mP', 'f8', ('m',), zlib=True)[:] = self.mP
-                                
-                L = self.factorH.L()
-                model_grp.createDimension('LH_nnz', L.nnz)
-                model_grp.createVariable("LH_data", "f4", ("LH_nnz",), zlib=True)[:] = L.data
-                model_grp.createVariable("LH_indices", "i4", ("LH_nnz",), zlib=True)[:] = L.indices
-                model_grp.createVariable("LH_indptr", "i4", ("ncols_plus_1",), zlib=True)[:] = L.indptr
-                model_grp.LH_shape = L.shape
-                model_grp.createVariable('PH', "i4", ('m',), zlib=True)[:] = self.factorH.P()
-                
-                L = self.factorP.L()
-                model_grp.createDimension('LP_nnz', L.nnz)
-                model_grp.createVariable("LP_data", "f4", ("LP_nnz",), zlib=True)[:] = L.data
-                model_grp.createVariable("LP_indices", "i4", ("LP_nnz",), zlib=True)[:] = L.indices
-                model_grp.createVariable("LP_indptr", "i4", ("ncols_plus_1",), zlib=True)[:] = L.indptr
-                model_grp.LP_shape = L.shape
-                model_grp.createVariable('PP', "i4", ('m',), zlib=True)[:] = self.factorP.P()
-                
                 
                 # Spline group
                 spline_grp.kt = self.k
                 spline_grp.nkt = self.nk
                 spline_grp.kt = self.kt
                 spline_grp.nkt = self.nkt
+    
+    
+    def factor_to_nc(self, filename: str):
+            """
+            Save spline factor to a NetCDF4 file.
+            Can be read/rebuilt using the icReader library.
+    
+            Parameters
+            ----------
+            filename : str
+                Full path to output NetCDF file.
+            """
+            with Dataset(filename, 'w') as nc:
+                                
+                # Model group
+                nc.createDimension('m', self.mH.size)
+                nc.createDimension('ncols_plus_1', self.mH.size+1)
+                
+                L = self.factorH.L()
+                nc.createDimension('LH_nnz', L.nnz)
+                nc.createVariable("LH_data", "f4", ("LH_nnz",), zlib=True)[:] = L.data
+                nc.createVariable("LH_indices", "i4", ("LH_nnz",), zlib=True)[:] = L.indices
+                nc.createVariable("LH_indptr", "i4", ("ncols_plus_1",), zlib=True)[:] = L.indptr
+                nc.LH_shape = L.shape
+                nc.createVariable('PH', "i4", ('m',), zlib=True)[:] = self.factorH.P()
+                
+                L = self.factorP.L()
+                nc.createDimension('LP_nnz', L.nnz)
+                nc.createVariable("LP_data", "f4", ("LP_nnz",), zlib=True)[:] = L.data
+                nc.createVariable("LP_indices", "i4", ("LP_nnz",), zlib=True)[:] = L.indices
+                nc.createVariable("LP_indptr", "i4", ("ncols_plus_1",), zlib=True)[:] = L.indptr
+                nc.LP_shape = L.shape
+                nc.createVariable('PP', "i4", ('m',), zlib=True)[:] = self.factorP.P()
+
 
 #%% Solver class
     
@@ -593,9 +611,13 @@ class Solver():
         return self._GTG
     
     @property
+    def gtg_mag(self):
+        return np.median(self.GTG.diagonal()[self.GTG.diagonal() != 0])
+    
+    @property
     def A(self):
         if self._A is None:
-            self._A = self.GTG + self.l * np.median(self.GTG.diagonal()) * self.LTL # Sparse regularization
+            self._A = self.GTG + self.l * self.gtg_mag * self.LTL # Sparse regularization
         return self._A
     
     @property

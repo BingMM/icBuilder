@@ -54,7 +54,8 @@ psamp = parser.parse_args().psamp
 base = parser.parse_args().base
 
 p_in = pjoin(base, 'conductance')
-p_out = pjoin(base, 'spline')
+spline_out = pjoin(base, 'spline')
+factor_out = pjoin(base, 'factor')
 
 #%% Overview
 
@@ -62,7 +63,8 @@ print('Running code for Spline model generation:')
 
 print('\n>>Paths<<')
 print('Pulling data from: ', p_in)
-print('Outputting to: ', p_out)
+print('Outputting splines to: ', spline_out)
+print('Outputting factor to: ', factor_out)
 
 print('\n>>Spline<<')
 print('ncp: ', ncp)
@@ -92,7 +94,8 @@ for orbit in loop:
     # Input and output file
     orbit_file = f'or_{str(orbit).zfill(4)}.nc'    
     conductance_file = pjoin(p_in, orbit_file)
-    spline_file = pjoin(base, orbit_file)
+    spline_file = pjoin(spline_out, orbit_file)
+    factor_file = pjoin(factor_out, orbit_file)
     
     # Load conductance image
     cI = ConductanceImage(conductance_file)
@@ -106,4 +109,5 @@ for orbit in loop:
                      )
 
     # Save spline image
-    sI.to_nc(spline_file)
+    sI.spline_to_nc(spline_file)
+    sI.factor_to_nc(factor_file)
