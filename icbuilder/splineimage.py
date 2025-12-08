@@ -461,22 +461,21 @@ class SplineImage():
                 if self.grid and hasattr(self.grid, "projection"):
                     nc.position     = self.grid.projection.position.astype(float)
                     nc.orientation  = self.grid.projection.orientation
-                    nc.L    = self.grid.L
-                    nc.W    = self.grid.W
-                    nc.Lres = self.grid.Lres
-                    nc.Wres = self.grid.Wres
+                    nc.L        = self.grid.L
+                    nc.W        = self.grid.W
+                    nc.Lres     = self.grid.Lres
+                    nc.Wres     = self.grid.Wres
                     nc.gridR    = self.grid.R
                 
-                nc.createVariable('mH', 'f8', ('m',), zlib=True)[:] = self.mH
-                nc.createVariable('mP', 'f8', ('m',), zlib=True)[:] = self.mP
-                nc.createVariable('mdH', 'f8', ('m',), zlib=True)[:] = self.mdH
-                nc.createVariable('mdP', 'f8', ('m',), zlib=True)[:] = self.mdP
+                nc.createVariable('mH', 'f8', ('m',), zlib=True)[:]     = self.mH
+                nc.createVariable('mP', 'f8', ('m',), zlib=True)[:]     = self.mP
+                nc.createVariable('mdH', 'f8', ('m',), zlib=True)[:]    = self.mdH
+                nc.createVariable('mdP', 'f8', ('m',), zlib=True)[:]    = self.mdP
                 
-                nc.kt = self.k
-                nc.nkt = self.nk
+                nc.k = self.k
+                nc.nk = self.nk
                 nc.kt = self.kt
                 nc.nkt = self.nkt
-    
     
     def factor_to_nc(self, filename: str):
             """
