@@ -452,55 +452,36 @@ class SplineImage():
                 Full path to output NetCDF file.
             """
             with Dataset(filename, 'w') as nc:
-                
-                # Groups
-                data_grp = nc.createGroup("data")
-                model_grp = nc.createGroup("model")
-                spline_grp = nc.createGroup("spline")
-                grid_grp = nc.createGroup("grid")
-                
-                
-                # Data space group
-                t, y, x = self.nt, self.n, self.n
-                data_grp.createDimension('time', t)
-                data_grp.createDimension('dim1', y)
-                data_grp.createDimension('dim2', x)
-    
-                data_grp.createVariable('H',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pH
-                data_grp.createVariable('P',  'f8', ('time', 'dim1', 'dim2'))[:] = self.pP
-                data_grp.createVariable('dH', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
-                data_grp.createVariable('dP', 'f8', ('time', 'dim1', 'dim2'))[:] = self.pdH
+                                                
+                nc.createDimension('time', self.nt)
+                nc.createDimension('m', self.mH.size)
     
                 if self.time is not None:
                     ref_time = datetime(2000, 1, 1)
                     time_seconds = np.array([(t - ref_time).total_seconds() for t in self.time], dtype=np.int32)
-                    data_grp.createVariable("time", np.int32, ("time",))[:] = time_seconds
-                    data_grp.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
+                    nc.createVariable("time", np.int32, ("time",), zlib=True)[:] = time_seconds
+                    nc.reference_time = ref_time.strftime("%Y-%m-%dT%H:%M:%S")
                 
-                data_grp.createVariable("ssalon", 'f8', ('time',))[:] = self.cI.ssalon
+                nc.createVariable("ssalon", 'f8', ('time',), zlib=True)[:] = self.cI.ssalon
                 
-                # Grid group
                 if self.grid and hasattr(self.grid, "projection"):
-                    grid_grp.position     = self.grid.projection.position.astype(float)
-                    grid_grp.orientation  = self.grid.projection.orientation
-                    grid_grp.L    = self.grid.L
-                    grid_grp.W    = self.grid.W
-                    grid_grp.Lres = self.grid.Lres
-                    grid_grp.Wres = self.grid.Wres
-                    grid_grp.gridR    = self.grid.R
+                    nc.position     = self.grid.projection.position.astype(float)
+                    nc.orientation  = self.grid.projection.orientation
+                    nc.L    = self.grid.L
+                    nc.W    = self.grid.W
+                    nc.Lres = self.grid.Lres
+                    nc.Wres = self.grid.Wres
+                    nc.gridR    = self.grid.R
                 
-                # Model group
-                model_grp.createDimension('m', self.mH.size)
-                #model_grp.createDimension('ncols_plus_1', self.mH.size+1)
+                nc.createVariable('mH', 'f8', ('m',), zlib=True)[:] = self.mH
+                nc.createVariable('mP', 'f8', ('m',), zlib=True)[:] = self.mP
+                nc.createVariable('mdH', 'f8', ('m',), zlib=True)[:] = self.mdH
+                nc.createVariable('mdP', 'f8', ('m',), zlib=True)[:] = self.mdP
                 
-                model_grp.createVariable('mH', 'f8', ('m',), zlib=True)[:] = self.mH
-                model_grp.createVariable('mP', 'f8', ('m',), zlib=True)[:] = self.mP
-                
-                # Spline group
-                spline_grp.kt = self.k
-                spline_grp.nkt = self.nk
-                spline_grp.kt = self.kt
-                spline_grp.nkt = self.nkt
+                nc.kt = self.k
+                nc.nkt = self.nk
+                nc.kt = self.kt
+                nc.nkt = self.nkt
     
     
     def factor_to_nc(self, filename: str):
