@@ -198,13 +198,6 @@ class SplineImage():
             self._sLTL /= np.median(self._sLTL.diagonal())
         return self._sLTL
     
-    #@property
-    #def LTL(self):
-    #    if self._LTL is None:
-    #        self._LTL = self.sLTL + self.tLTL
-    #    return self._LTL
-            
-    
 #%% Spline
 
     def reset_spline(self):
@@ -404,7 +397,7 @@ class SplineImage():
         # We process all samples at once or in batches if memory is tight
         #print(f"Estimating {comp} uncertainty with {n_samples} stochastic probes...")
         rng = np.random.default_rng(seed=1337)
-        z = rng.random.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, self.psamp))
+        z = rng.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, self.psamp))
         
         # 2. Project random vectors to model space: v = G.T @ z
         # This uses the sparse matrix transpose
