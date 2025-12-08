@@ -403,7 +403,8 @@ class SplineImage():
         # Shape: (n_data_points, n_samples)
         # We process all samples at once or in batches if memory is tight
         #print(f"Estimating {comp} uncertainty with {n_samples} stochastic probes...")
-        z = np.random.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, self.psamp))
+        rng = np.random.default_rng(seed=1337)
+        z = rng.random.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(n_data, self.psamp))
         
         # 2. Project random vectors to model space: v = G.T @ z
         # This uses the sparse matrix transpose
