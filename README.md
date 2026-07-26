@@ -11,6 +11,12 @@ This code was developed to robustly estimate ionospheric conductances from IMAGE
 
 The main purpose of this codebase is to document the data processing procedure. While not primarily designed for external use, the code can be run by others if needed.
 
+## Project Memory
+
+For repository-specific operating guidance and technical continuity, start with
+[`AGENTS.md`](AGENTS.md) and
+[`log/icBuilder/START HERE - AI Onboarding.md`](log/icBuilder/START%20HERE%20-%20AI%20Onboarding.md).
+
 ## Dependencies
 
 - [`fuvpy`](https://github.com/aohma/fuvpy) – for FUV image processing **[3]**
