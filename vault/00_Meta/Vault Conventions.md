@@ -26,9 +26,25 @@ Use evidence labels where ambiguity matters:
 - `03_Decisions/Decision Log.md`: durable decisions and rationale.
 - `04_Sessions/`: new dated historical evidence when a session merits it.
 - `05_Handoff/Handoff - Latest.md`: concise next actionable state, risks, and
-  verification entry points.
+  verification entry points, plus a structured `Portfolio impact` section.
 
 Link to the note that owns a detail rather than repeating the same narrative.
+
+## Cross-session synchronization
+
+Project agents update this vault automatically after durable milestones. They
+do not edit the central second brain.
+
+At each meaningful checkpoint, refresh the latest handoff with:
+
+- `Central update needed: Yes` or `No`;
+- portfolio-level changes, limited to status, priority, deadline, next
+  decision, or research significance;
+- a one-to-three-sentence sync summary.
+
+The central agent uses that section to reconcile project work asynchronously.
+Skip vault updates for transient exploration, unchanged state, and explicitly
+read-only work.
 
 ## Legacy material
 

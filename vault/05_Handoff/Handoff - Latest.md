@@ -1,7 +1,8 @@
 # Handoff - Latest
 
 Last updated: 2026-07-26
-Verified code snapshot: `main` at `3fc2fc6`
+Repository snapshot: `main` at `2f47e9a`
+Verified code snapshot: `3fc2fc6`
 
 ## Project state
 
@@ -19,6 +20,9 @@ At the 2026-07-26 review:
 
 - `main` was clean and aligned with `origin/main` at `3fc2fc6` before the vault
   migration;
+- the documentation-only vault migration was committed locally at `2f47e9a`,
+  leaving `main` one commit ahead of `origin/main` before the synchronization
+  protocol was added;
 - the primary orbit-index, background-removal, conductance, and spline scripts
   were present;
 - all 25 Python files under `icbuilder/` and `scripts/` passed a read-only AST
@@ -56,6 +60,14 @@ external corpus.
 - Historical spline and neural-network findings have not been independently
   reproduced in the current review.
 
+## Portfolio impact
+
+- Central update needed: No
+- Changes: None
+- Sync summary: `icBuilder` remains completed for now with no recorded
+  deadline. The next portfolio decision remains the trigger and scope for a
+  future revisit.
+
 ## Entry points
 
 - `README.md`
@@ -68,6 +80,6 @@ external corpus.
 
 ## Historical evidence
 
-The dated notes and attachments at the `log/icBuilder/` root are preserved as
+The dated notes and attachments at the `vault/` root are preserved as
 legacy session history. Read them only when investigating a specific earlier
 decision, configuration, or result.

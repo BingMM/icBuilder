@@ -4,11 +4,11 @@ Last reviewed: 2026-07-26
 
 This is the human and Obsidian entry point for the `icBuilder` project vault.
 The machine-readable operating contract is the repository root
-[`AGENTS.md`](../../AGENTS.md); do not duplicate or override it here.
+[`AGENTS.md`](../AGENTS.md); do not duplicate or override it here.
 
 ## Reading order
 
-1. [`AGENTS.md`](../../AGENTS.md)
+1. [`AGENTS.md`](../AGENTS.md)
 2. [`01_Project/Current State.md`](01_Project/Current%20State.md)
 3. [`05_Handoff/Handoff - Latest.md`](05_Handoff/Handoff%20-%20Latest.md)
 4. [`01_Project/Project Brief.md`](01_Project/Project%20Brief.md)

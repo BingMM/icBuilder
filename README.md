@@ -15,7 +15,7 @@ The main purpose of this codebase is to document the data processing procedure. 
 
 For repository-specific operating guidance and technical continuity, start with
 [`AGENTS.md`](AGENTS.md) and
-[`log/icBuilder/START HERE - AI Onboarding.md`](log/icBuilder/START%20HERE%20-%20AI%20Onboarding.md).
+[`vault/START HERE - AI Onboarding.md`](vault/START%20HERE%20-%20AI%20Onboarding.md).
 
 ## Dependencies
 

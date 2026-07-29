@@ -1,8 +1,10 @@
 # Current State
 
 Last reviewed: 2026-07-26
-Code snapshot: `main` at `3fc2fc6`
-Upstream at review: aligned with `origin/main` before the vault migration
+Repository snapshot: `main` at `2f47e9a`
+Latest code snapshot: `3fc2fc6`
+Upstream state: one documentation commit ahead of `origin/main` before the
+synchronization-protocol edits
 
 ## Current position
 
@@ -23,7 +25,7 @@ implementation state represented by the code snapshot above.
   and conductance-orbit generation are present.
 - Conductance, spline, representative raw/intermediate data, and figures are
   tracked under `example_data/`.
-- The established `log/icBuilder/` vault contains dated technical history and
+- The repository-root `vault/` contains dated technical history and
   figures from 2025.
 - No automated test suite or CI workflow was found.
 - On 2026-07-26, all 25 Python files under `icbuilder/` and `scripts/` passed a

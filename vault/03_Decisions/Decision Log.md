@@ -21,3 +21,7 @@ second renamed vault would split project memory and break continuity.
 
 The architecture migration is documentation-only and does not imply
 scientific, dataset, or implementation progress.
+
+**Superseded 2026-07-26:** The user subsequently standardized all project
+memory at the repository-root `vault/` path. The complete existing vault was
+moved intact; only its location and operational references changed.

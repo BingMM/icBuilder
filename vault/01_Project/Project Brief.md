@@ -49,7 +49,7 @@ exist, but they are not all part of the primary production sequence.
 - `scripts/make_spline_model_files.py`: spline and factor products.
 - `example_data/`: tracked representative inputs, intermediates, products, and
   figures; preserve unless regeneration is deliberate.
-- `log/icBuilder/`: technical project memory and historical research notes.
+- `vault/`: technical project memory and historical research notes.
 
 ## External dependencies
 
