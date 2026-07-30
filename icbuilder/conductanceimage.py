@@ -39,6 +39,10 @@ class ConductanceImage:
         dP, dH  : Uncertainty based on error propagation [mho].
         dP2, dH2: Alternative uncertainty.
         ssalon : Apex magnetic longitude of subsolar point
+        wic_sza, s12_sza, s13_sza : Per-sensor median solar zenith angle.
+        wic_dza, s12_dza, s13_dza : Per-sensor median detector zenith angle.
+        wic_los_factor, s12_los_factor, s13_los_factor :
+            Per-sensor median ``cos(DZA)`` diagnostic.
     """
 
     def __init__(
@@ -83,6 +87,7 @@ class ConductanceImage:
         
         self._store_binned_counts(wic, s12, s13)
         self._store_binned_weights(wic, s12, s13)
+        self._store_binned_geometry(wic, s12, s13)
         self._initialize_arrays()
         self._compute_conductance()
 
@@ -107,6 +112,42 @@ class ConductanceImage:
         self.wic_w = wic.w
         self.s12_w = s12.w
         self.s13_w = s13.w
+
+    def _store_binned_geometry(
+        self,
+        wic: BinnedImage,
+        s12: BinnedImage,
+        s13: BinnedImage
+    ):
+        """
+        Preserve per-sensor viewing geometry and LOS-processing provenance.
+
+        Geometry remains sensor-specific because the three instruments can
+        contribute different source pixels to the same target grid cell.
+        """
+        for sensor, binned in (("wic", wic), ("s12", s12), ("s13", s13)):
+            for field in ("sza", "dza", "los_factor"):
+                values = getattr(binned, field)
+                if values.shape != self.shape:
+                    raise ValueError(
+                        f"{sensor}.{field} must have shape {self.shape}, "
+                        f"got {values.shape}."
+                    )
+                setattr(self, f"{sensor}_{field}", np.copy(values))
+
+            setattr(
+                self,
+                f"{sensor}_los_correction",
+                bool(binned.los_correction)
+            )
+            image_correction = (
+                "raw" if binned.correction is None else str(binned.correction)
+            )
+            setattr(
+                self,
+                f"{sensor}_image_correction",
+                image_correction
+            )
 
     def _initialize_arrays(self):
         """
@@ -187,9 +228,14 @@ class ConductanceImage:
             nc.createDimension("dim2", x)
     
             # Helper
-            def save_var(name, data):
+            def save_var(name, data, units=None, long_name=None):
                 v = nc.createVariable(name, "f4", ("time", "dim1", "dim2"), zlib=True)
                 v[:] = data
+                if units is not None:
+                    v.units = units
+                if long_name is not None:
+                    v.long_name = long_name
+                return v
     
             # Save main variables
             for attr in [
@@ -197,6 +243,56 @@ class ConductanceImage:
                 "E0", "dE0", "Fe", "dFe", "R", "dR", "P", "H", "dP", "dH", "w"
             ]:
                 save_var(attr, getattr(self, attr))
+
+            # Preserve viewing geometry separately for each IMAGE-FUV sensor.
+            sensor_names = {
+                "wic": "WIC",
+                "s12": "SI12",
+                "s13": "SI13",
+            }
+            for sensor, display_name in sensor_names.items():
+                save_var(
+                    f"{sensor}_sza",
+                    getattr(self, f"{sensor}_sza"),
+                    units="degrees",
+                    long_name=(
+                        f"Median {display_name} solar zenith angle of "
+                        "contributing pixels"
+                    ),
+                )
+                save_var(
+                    f"{sensor}_dza",
+                    getattr(self, f"{sensor}_dza"),
+                    units="degrees",
+                    long_name=(
+                        f"Median {display_name} detector zenith angle of "
+                        "contributing pixels"
+                    ),
+                )
+                save_var(
+                    f"{sensor}_los_factor",
+                    getattr(self, f"{sensor}_los_factor"),
+                    units="1",
+                    long_name=(
+                        f"Median {display_name} cos(DZA) of contributing "
+                        "pixels"
+                    ),
+                )
+                nc.setncattr(
+                    f"{sensor}_los_correction",
+                    np.int8(getattr(self, f"{sensor}_los_correction")),
+                )
+                nc.setncattr(
+                    f"{sensor}_image_correction",
+                    getattr(self, f"{sensor}_image_correction"),
+                )
+
+            nc.los_factor_definition = (
+                "Median cos(DZA) of the source pixels contributing to each "
+                "binned image value; diagnostic only and not generally an "
+                "exact multiplier between corrected and uncorrected binned "
+                "medians."
+            )
     
             # Scalars
             nc.Ep  = float(self.Ep)

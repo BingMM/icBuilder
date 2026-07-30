@@ -61,7 +61,7 @@ class PreImage:
         """
         self.index = index
 
-        var_names = ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']
+        var_names = ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight', 'sza', 'dza']
         for name in var_names:
             var_data = ncdf.variables[name]
             data = var_data[...] if index is None else var_data[index, :, :]
@@ -69,6 +69,86 @@ class PreImage:
 
         self.shape = self.mlat.shape
         self.ssalon = np.full(self.shape[0], np.nan)
+
+    def get_SZA(self, i: int) -> NDArray[np.float64]:
+        """
+        Return the SZA for frame i.
+
+        Parameters
+        ----------
+        i : int
+            Frame index.
+
+        Returns
+        -------
+        np.ndarray
+            SZA.
+        """
+        return self.sza[i, :, :]
+    
+    def get_DZA(self, i: int) -> NDArray[np.float64]:
+        """
+        Return the DZA for frame i.
+
+        Parameters
+        ----------
+        i : int
+            Frame index.
+
+        Returns
+        -------
+        np.ndarray
+            DZA.
+        """
+        return self.dza[i, :, :]
+
+    def get_img_los(self, i: int) -> NDArray[np.float64]:
+        """
+        Return the image with DZA correction for frame i.
+
+        Parameters
+        ----------
+        i : int
+            Frame index.
+
+        Returns
+        -------
+        np.ndarray
+            Image with DZA correction.
+        """
+        return self.img[i, :, :]*np.cos(np.radians(self.dza[i, :, :]))
+
+    def get_shimg_los(self, i: int) -> NDArray[np.float64]:
+        """
+        Return the SH corrected image with DZA correction for frame i.
+
+        Parameters
+        ----------
+        i : int
+            Frame index.
+
+        Returns
+        -------
+        np.ndarray
+            SH corrected image with DZA correction.
+        """
+        return self.shimg[i, :, :]*np.cos(np.radians(self.dza[i, :, :]))
+
+    def get_dgimg_los(self, i: int) -> NDArray[np.float64]:
+        """
+        Return the dayglow subtracted image with DZA correction for frame i.
+
+        Parameters
+        ----------
+        i : int
+            Frame index.
+
+        Returns
+        -------
+        np.ndarray
+            dayglow subtracted image with DZA correction.
+        """
+        return self.dgimg[i, :, :]*np.cos(np.radians(self.dza[i, :, :]))
 
     def get_img(self, i: int) -> NDArray[np.float64]:
         """
@@ -208,7 +288,7 @@ class PreImage:
         f : list[int] or np.ndarray
             Indices of frames to retain.
         """
-        for name in ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight']:
+        for name in ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight', 'sza', 'dza']:
             setattr(self, name, getattr(self, name)[f, :, :])
         
         self.ssalon = self.ssalon[f]

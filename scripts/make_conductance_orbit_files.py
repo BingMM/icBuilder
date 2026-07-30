@@ -122,9 +122,10 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     s13_pI.discard(f)
 
         # Bin and conductance images
-    wic_bI = BinnedImage(wic_pI, grid_w, inflate_uncertainty=True, correction='SH')
-    s12_bI = BinnedImage(s12_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG')
-    s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG')
+    losc = True
+    wic_bI = BinnedImage(wic_pI, grid_w, inflate_uncertainty=True, correction='SH', los_correction=losc)
+    s12_bI = BinnedImage(s12_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG', los_correction=losc)
+    s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG', los_correction=losc)
     cI = ConductanceImage(wic_bI, s12_bI, s13_bI, time=t)
         # Save to netCDF
     out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
@@ -226,10 +227,8 @@ grid_w = CSgrid(CSprojection(position, orientation), L, L, Lres, Lres, R = 6481.
 target_Lres = 450e3
 dist = grid_w.Lres*grid_w.shape[0]
 steps = np.round(dist / target_Lres).astype(int)
-dxi = np.diff(np.linspace(grid_w.xi.min(), grid_w.xi.max(), steps)).mean()
-deta = np.diff(np.linspace(grid_w.eta.min(), grid_w.eta.max(), steps)).mean()
-xi_e = np.linspace(grid_w.xi.min()-dxi/2, grid_w.xi.max()+dxi/2, steps+1)
-eta_e = np.linspace(grid_w.eta.min()-deta/2, grid_w.eta.max()+deta/2, steps+1)
+xi_e = np.linspace(grid_w.xi_mesh[0, :][0], grid_w.xi_mesh[0, :][-1], steps+1)
+eta_e = np.linspace(grid_w.eta_mesh[:, 0][0], grid_w.eta_mesh[:, 0][-1], steps+1)
 Lres = dist / steps
 grid_s = CSgrid(CSprojection(position, orientation), L, L, Lres, Lres, edges = (xi_e, eta_e), R = 6481.2e3)
 print('Fine grid resolution is: ' + str(grid_w.Lres/1e3) + ' km')
