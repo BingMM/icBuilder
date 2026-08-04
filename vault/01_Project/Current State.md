@@ -1,9 +1,8 @@
 # Current State
 
-Last reviewed: 2026-07-31
-Repository snapshot: `main` at `d854016`
-Upstream state: uncommitted collapse, lookup, geometry, Kp, and E0-integration
-work
+Last reviewed: 2026-08-04
+Repository snapshot: `main` at `f2e8d5d`
+Upstream state: uncommitted verified `BinnedImage` serial optimizations
 
 ## Current position
 
@@ -84,7 +83,7 @@ causal boundary. See [[Audit - 2026-07-29]].
 - MLT is correctly retained as a two-dimensional grid coordinate:
   `(grid.lon / 15) % 24`. A native `(xi, eta)` diagnostic shows the MLT,
   E0, and dE0 fields together.
-- All 36 focused tests pass. They cover the collapse, lookup and grid,
+- All 39 focused tests pass. They cover the collapse, lookup and grid,
   definitive-Kp integrity and boundary matching, paired E0 override, SI13
   invariance, induced covariance, zero-flux Robinson propagation, geometry,
   and NetCDF provenance. Selected Kp=1.52 lookup cells agree with direct
@@ -180,6 +179,11 @@ causal boundary. See [[Audit - 2026-07-29]].
   each channel's image-correction mode and LOS-applied flag. The scientific
   approximation remains provisional: it defaults on and is enabled for all
   three channels including SI12.
+- `BinnedImage` now groups populated source pixels once by a flattened bin
+  number, caches Student-t and chi-square multipliers by sample count, and
+  shares SI-to-WIC triangulations only among fields with identical non-NaN
+  source masks. A complete orbit-0085 scratch product remained byte-for-byte
+  identical while elapsed time fell from 25.83 to 18.94 seconds locally.
 
 ## Immediate scientific questions
 

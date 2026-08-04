@@ -101,6 +101,13 @@ two-dimensional `mlt`, `xi`, and `eta` coordinates.
 - Stores the original GFZ Kp, rounded lookup Kp, Kp interval start, source
   provenance, E0--Fe covariance, and lookup/collapse provenance.
 
+`BinnedImage` groups the source pixels belonging to each populated grid cell
+once before calculating medians, standard deviations, weights, and viewing
+geometry. Uncertainty multipliers are evaluated once for each distinct sample
+count. When coarse SI fields are interpolated to the WIC grid, fields share a
+triangulation only when their non-NaN source cells are identical; fields with
+different missing-data patterns retain their own valid source cells.
+
 Input and output folder names default to `wic`, `s12`, `s13`, and
 `conductance` under `--base`, but can be changed independently. For example,
 the Chapman server directories are selected with:

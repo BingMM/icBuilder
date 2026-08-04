@@ -1,10 +1,9 @@
 # Handoff - Latest
 
-Last updated: 2026-07-31
-Repository snapshot: `main` at `d854016`
-Worktree state: uncommitted Zhang–Paxton collapse and fixed-grid lookup,
-definitive Kp integration, tests, figures, memory, SI-grid fix, and regenerated
-example products
+Last updated: 2026-08-04
+Repository snapshot: `main` at `f2e8d5d`
+Worktree state: uncommitted verified `BinnedImage` serial optimizations,
+focused regression tests, and documentation
 
 ## Project state
 
@@ -57,6 +56,14 @@ The Zhang–Paxton implementation did not read or modify IMAGE data or tracked
 `example_data/` products. The user subsequently fixed the independent
 SI-grid construction defect and regenerated orbit 0085/0086 products and
 figures.
+
+`BinnedImage` has been optimized without changing its scientific calculation.
+It stably groups source pixels once by populated grid cell, evaluates the
+Student-t and chi-square uncertainty multipliers once per distinct sample
+count, and shares target-grid triangulations only among fields with identical
+non-NaN source masks. Fields with different missing-data support remain
+independent. Comments in the calculation explain the historical count, NaN,
+weight, and geometry semantics that must be preserved.
 
 A subsequent full read-only audit did read the five tracked example
 conductance products and the representative raw/intermediate metadata. It did
@@ -116,7 +123,7 @@ Q-threshold boundary from producing the visible jitter present at
 - Fresh direct collapses checked nine cells spanning Kp 0.00, 1.52, and 9.00.
   The maximum difference across E0, dE0, and median E0 was `2.4e-7 keV`, as
   expected from float32 table storage.
-- All 36 focused tests pass. They cover canonical grid shape/nesting,
+- All 39 focused tests pass. They cover canonical grid shape/nesting,
   two-dimensional MLT, nearest-hundredth Kp quantization, lookup shape,
   scalar/vector access, direct-collapse agreement, definitive-Kp integrity and
   boundary matching and checksum, paired E0 override, SI13 invariance, induced
@@ -147,6 +154,14 @@ Q-threshold boundary from producing the visible jitter present at
 
 - All Python files under `icbuilder/`, `scripts/`, and `tests/` parse, and
   `git diff --check` passes.
+- Frozen-reference tests show exact equality for grouped binning, cached
+  uncertainty inflation, and grouped interpolation, including NaNs and masks.
+- On tracked orbit-0085 intermediate inputs, complete `BinnedImage`
+  construction improved from 8.687 to 3.782 seconds for WIC, 1.850 to 0.815
+  seconds for SI12, and 1.824 to 0.818 seconds for SI13. All seven output
+  fields were exactly equal. A full isolated orbit run improved from 25.83 to
+  18.94 seconds, and the resulting 32-variable NetCDF file was byte-for-byte
+  identical. Tracked example products were not modified.
 - The earlier four collapse figure sets remain valid; their polar orientation,
   threshold curves, and dE0 companion were visually checked previously.
 

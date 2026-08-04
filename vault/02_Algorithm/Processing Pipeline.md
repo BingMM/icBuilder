@@ -1,6 +1,6 @@
 # Processing Pipeline
 
-Last reviewed: 2026-07-30
+Last reviewed: 2026-08-04
 
 This note records the durable high-level workflow visible in the README and
 live code. It is orientation, not a claim that the full production dataset was
@@ -46,6 +46,16 @@ reproduced during the review.
    `cos(DZA)` is diagnostic: because correction precedes the image median, it
    is not generally an exact multiplier between corrected and uncorrected
    binned brightness.
+
+   Binning calculates one flattened cell number per source pixel, stably
+   groups the populated cells, and then calculates each cell's statistics in
+   original source-pixel order. This replaces repeated full-image scans
+   without changing count, NaN, median, standard-deviation, weight, or
+   viewing-geometry semantics. Student-t and chi-square multipliers are cached
+   by integer sample count. During SI-to-WIC interpolation, fields with the
+   same non-NaN source mask share a triangulation; differing masks are kept in
+   separate groups so valid information is not discarded merely to gain
+   speed.
 
 5. **Serialization**
    `icbuilder/conductanceimage.py` writes sensor statistics, characteristic

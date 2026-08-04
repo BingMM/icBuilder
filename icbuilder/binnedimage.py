@@ -91,9 +91,6 @@ class BinnedImage:
             #lat, lon = pI.get_mcoords(i) # Get magnetic coordinates
             lat, _, mlt, _ = pI.get_mcoords(i) # Get magnetic coordinates
             lon = mlt*15
-            f = grid.ingrid(lon, lat) # Find data inside the CS grid
-            self.counts[i] = grid.count(lon[f], lat[f]) # Count the number of pixels in each bin
-
             if correction == 'SH':
                 if los_correction:
                     img = pI.get_shimg_los(i) # Get the SH corrected image
@@ -113,59 +110,74 @@ class BinnedImage:
             sza = pI.get_SZA(i)
             dza = pI.get_DZA(i)
 
-            j, k = grid.bin_index(lon, lat) # Make bin index
-            for jj in range(ny):
-                for kk in range(nx):
-                    
-                    # id
-                    id_ = (i, jj, kk)
-                    
-                    # If less than 2 pixels in bin, continue
-                    if self.counts[id_] < 2:
-                        continue
-                    
-                    # Get index of data in a single bin
-                    mask = (j == jj) & (k == kk)
-                    
-                    # Grab values in the (jj, kk) bin
-                    values = img.flatten()[mask]
-                    
-                    # Any NaN?
-                    fnan = np.isnan(values)
-                    
-                    # If less than 2 non-NaN values, continue
-                    if np.sum(~fnan) < 2:
-                        continue
-                    
-                    # Correct counts based on NaN values
-                    if np.any(fnan):
-                        self.counts[id_] -= np.sum(fnan)
-                        
-                    # Calculate NaN safe statistics
-                    median_val = np.nanmedian(values)
-                    self.mu[id_] = max(median_val, 0)  # zero if negative
-                    self.sigma[id_] = np.nanstd(values)
+            # ``bin_index`` returns one flattened grid-cell index per source
+            # pixel. Sort those indices once, preserving source-pixel order
+            # within each cell, and then work only on populated cells. The old
+            # implementation scanned every source pixel for every grid cell.
+            j, k = grid.bin_index(lon, lat)
+            valid_bin = (j >= 0) & (j < ny) & (k >= 0) & (k < nx)
+            source_index = np.flatnonzero(valid_bin)
+            flat_bin = j[valid_bin] * nx + k[valid_bin]
+            order = np.argsort(flat_bin, kind='stable')
+            source_index = source_index[order]
+            flat_bin = flat_bin[order]
 
-                    # Preserve viewing geometry for the same source pixels
-                    # that contributed to the image statistics. The median
-                    # cosine is retained because the correction is applied
-                    # pixel by pixel before taking the image median.
-                    valid_image = ~fnan
-                    sza_values = sza.flatten()[mask][valid_image]
-                    dza_values = dza.flatten()[mask][valid_image]
-                    finite_sza = np.isfinite(sza_values)
-                    finite_dza = np.isfinite(dza_values)
-                    if np.any(finite_sza):
-                        self.sza[id_] = np.median(sza_values[finite_sza])
-                    if np.any(finite_dza):
-                        self.dza[id_] = np.median(dza_values[finite_dza])
-                        self.los_factor[id_] = np.median(
-                            np.cos(np.radians(dza_values[finite_dza]))
-                        )
-                        
-                    # Grab weights
-                    values = w.flatten()[mask]
-                    self.w[id_] = np.nanmedian(values)
+            # Flatten each source field once. A stable bin sort means that the
+            # values inside a cell retain their original order, preserving the
+            # floating-point arithmetic of the previous implementation.
+            img_flat = img.flatten()
+            w_flat = w.flatten()
+            sza_flat = sza.flatten()
+            dza_flat = dza.flatten()
+
+            if flat_bin.size:
+                starts = np.r_[0, np.flatnonzero(np.diff(flat_bin)) + 1]
+                stops = np.r_[starts[1:], flat_bin.size]
+            else:
+                starts, stops = [], []
+
+            for start, stop in zip(starts, stops):
+                jj, kk = divmod(flat_bin[start], nx)
+                id_ = (i, jj, kk)
+                indices = source_index[start:stop]
+
+                # Keep the historical count semantics: cells begin with the
+                # number of geometrically valid pixels. Counts are reduced for
+                # NaN image values only when at least two image values remain.
+                self.counts[id_] = stop - start
+                if self.counts[id_] < 2:
+                    continue
+
+                values = img_flat[indices]
+                fnan = np.isnan(values)
+                if np.sum(~fnan) < 2:
+                    continue
+                if np.any(fnan):
+                    self.counts[id_] -= np.sum(fnan)
+
+                median_val = np.nanmedian(values)
+                self.mu[id_] = max(median_val, 0)  # zero if negative
+                self.sigma[id_] = np.nanstd(values)
+
+                # Preserve viewing geometry for the same source pixels that
+                # contributed to the image statistics. The median cosine is a
+                # diagnostic because correction occurs before image binning.
+                valid_image = ~fnan
+                sza_values = sza_flat[indices][valid_image]
+                dza_values = dza_flat[indices][valid_image]
+                finite_sza = np.isfinite(sza_values)
+                finite_dza = np.isfinite(dza_values)
+                if np.any(finite_sza):
+                    self.sza[id_] = np.median(sza_values[finite_sza])
+                if np.any(finite_dza):
+                    self.dza[id_] = np.median(dza_values[finite_dza])
+                    self.los_factor[id_] = np.median(
+                        np.cos(np.radians(dza_values[finite_dza]))
+                    )
+
+                # Weights retain their historical independent NaN handling;
+                # an image NaN does not remove the corresponding weight.
+                self.w[id_] = np.nanmedian(w_flat[indices])
                             
         if inflate_uncertainty:
             self._inflate_uncertainty()
@@ -188,16 +200,28 @@ class BinnedImage:
         alpha_std : float
             Confidence level for inflating the standard deviation. .32 = 68% = 1 std
         """
+        # Counts are integers stored in a floating-point array. Most cells
+        # share one of only a few counts, so evaluate the expensive probability
+        # distributions once per count and reuse the scalar multipliers.
+        valid_counts = np.unique(self.counts[self.counts >= 2]).astype(int)
+        multipliers = {}
+        for count in valid_counts:
+            df = count - 1
+            multipliers[count] = (
+                t.ppf(1 - alpha_mean / 2, df),
+                np.sqrt(df / chi2.ppf(alpha_std / 2, df)),
+            )
+
         for i in range(self.shape[0]):
             for j in range(self.shape[1]):
                 for k in range(self.shape[2]):
-                    df = self.counts[i, j, k] - 1
+                    count = self.counts[i, j, k]
+                    df = count - 1
                     if df < 1:
                         continue
-                    t_multiplier = t.ppf(1 - alpha_mean / 2, df)
-                    mean_unc = t_multiplier * self.sigma[i, j, k] / np.sqrt(self.counts[i, j, k])
-                    chi2_lower = chi2.ppf(alpha_std / 2, df)
-                    std_inflation = self.sigma[i, j, k] * np.sqrt(df / chi2_lower)
+                    t_multiplier, std_multiplier = multipliers[int(count)]
+                    mean_unc = t_multiplier * self.sigma[i, j, k] / np.sqrt(count)
+                    std_inflation = self.sigma[i, j, k] * std_multiplier
                     self.sigma[i, j, k] = np.sqrt(mean_unc**2 + std_inflation**2)
 
     def _interpolate(self, 
@@ -228,45 +252,48 @@ class BinnedImage:
         self.dza    = np.full((time_len, ny, nx), np.nan)
         self.los_factor = np.full((time_len, ny, nx), np.nan)
 
+        source_fields = {
+            'mu': self.mu_,
+            'sigma': self.sigma_,
+            'w': self.w_,
+            'sza': self.sza_,
+            'dza': self.dza_,
+            'los_factor': self.los_factor_,
+        }
+
         for i in range(time_len):
-            # Interpolate mu
-            mask = ~np.isnan(self.mu_[i])
-            self.mu[i] = griddata(
-                (self.grid.xi[mask], self.grid.eta[mask]), self.mu_[i][mask],
-                (target_grid.xi, target_grid.eta), method='linear', fill_value=np.nan
-            )
-            # Interpolate sigma
-            mask = ~np.isnan(self.sigma_[i])
-            self.sigma[i] = griddata(
-                (self.grid.xi[mask], self.grid.eta[mask]), self.sigma_[i][mask],
-                (target_grid.xi, target_grid.eta), method='linear', fill_value=np.nan
-            )
-            # Interpolate w
-            mask = ~np.isnan(self.w_[i])
-            self.w[i] = griddata(
-                (self.grid.xi[mask], self.grid.eta[mask]), self.w_[i][mask],
-                (target_grid.xi, target_grid.eta), method='linear', fill_value=np.nan
-            )
-            # Interpolate SZA
-            mask = ~np.isnan(self.sza_[i])
-            self.sza[i] = griddata(
-                (self.grid.xi[mask], self.grid.eta[mask]), self.sza_[i][mask],
-                (target_grid.xi, target_grid.eta), method='linear', fill_value=np.nan
-            )
-            # Interpolate DZA
-            mask = ~np.isnan(self.dza_[i])
-            self.dza[i] = griddata(
-                (self.grid.xi[mask], self.grid.eta[mask]), self.dza_[i][mask],
-                (target_grid.xi, target_grid.eta), method='linear', fill_value=np.nan
-            )
-            # Interpolate the diagnostic LOS factor
-            mask = ~np.isnan(self.los_factor_[i])
-            self.los_factor[i] = griddata(
-                (self.grid.xi[mask], self.grid.eta[mask]),
-                self.los_factor_[i][mask],
-                (target_grid.xi, target_grid.eta), method='linear',
-                fill_value=np.nan
-            )
+            # Fields can share one triangulation only when they have exactly
+            # the same non-NaN source cells. Group equal masks to gain that
+            # reuse without discarding valid values from another field. If all
+            # masks differ, this naturally reproduces six independent calls.
+            mask_groups = {}
+            for name, values in source_fields.items():
+                mask = ~np.isnan(values[i])
+                mask_groups.setdefault(mask.tobytes(), []).append((name, mask))
+
+            for group in mask_groups.values():
+                names = [name for name, _ in group]
+                mask = group[0][1]
+                points = (self.grid.xi[mask], self.grid.eta[mask])
+
+                if len(names) == 1:
+                    values = source_fields[names[0]][i][mask]
+                else:
+                    values = np.column_stack([
+                        source_fields[name][i][mask] for name in names
+                    ])
+
+                interpolated = griddata(
+                    points, values,
+                    (target_grid.xi, target_grid.eta), method='linear',
+                    fill_value=np.nan
+                )
+
+                if len(names) == 1:
+                    getattr(self, names[0])[i] = interpolated
+                else:
+                    for column, name in enumerate(names):
+                        getattr(self, name)[i] = interpolated[..., column]
 
         self.grid = dcopy(target_grid)
 
