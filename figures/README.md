@@ -1,10 +1,11 @@
 # Zhang–Paxton latitude-collapse figures
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-31
 
-These figures document the exploratory reduction implemented in
-`scripts/ZhangPaxton2008_collapse.py`. They use only the Zhang–Paxton model and
-do not read or alter IMAGE data.
+These figures document the reduction implemented in
+`icbuilder/zhang_paxton_collapse.py`. Plot construction and the command-line
+entry point are kept separately in `scripts/ZhangPaxton2008_collapse.py`.
+They use only the Zhang–Paxton model and do not read or alter IMAGE data.
 
 The reduction evaluates electron mean energy, `E0` (keV), and energy flux, `Q`
 (mW m-2), in 0.01-degree cells from 50 to 90 degrees northern magnetic
@@ -51,6 +52,8 @@ Outputs:
   sensitivity for representative E0;
 - `zhang_paxton_collapse_dE0_result`: the corresponding profile-derived dE0
   map and threshold sensitivity.
+- `zhang_paxton_lookup_kp1_52`: the table's two-dimensional MLT coordinate,
+  E0, and dE0 in native Cubed-Sphere `(xi, eta)` coordinates.
 
 The dE0 figure uses the `weighted_spread` returned by the collapse:
 `sqrt(sum(w * (E0 - E0_mean)^2) / sum(w))`, with the same spherical-area
@@ -73,6 +76,6 @@ The script reports empty selections, contact with the 50-degree equatorward
 sampling limit (possible domain truncation), and extension to the physical
 90-degree pole. Reaching the physical pole is not itself sampling truncation.
 
-This collapse is not yet connected to `ConductanceImage`. In particular,
-`ConductanceImage.Ep` is proton characteristic energy; it must not receive the
-electron mean energy calculated here without a separate scientific decision.
+The collapsed E0 and dE0 are now supplied to `ConductanceImage` through the
+fixed-grid lookup. `ConductanceImage.Ep` remains proton characteristic energy
+and is separate from this electron quantity.

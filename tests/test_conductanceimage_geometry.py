@@ -59,7 +59,12 @@ def test_geometry_survives_conductance_image_and_netcdf(
     wic = _BinnedImage(1.0, "SH", True)
     s12 = _BinnedImage(2.0, "DG", True)
     s13 = _BinnedImage(3.0, "DG", False)
-    conductance = ConductanceImage(wic, s12, s13)
+    conductance = ConductanceImage(
+        wic,
+        s12,
+        s13,
+        energy_method="image_ratio",
+    )
 
     assert conductance.wic_sza[0, 0, 0] == 11.0
     assert conductance.s12_dza[0, 0, 0] == 22.0

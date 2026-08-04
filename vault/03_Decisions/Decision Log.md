@@ -1,6 +1,78 @@
 # Decision Log
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-31
+
+## 2026-07-31 — Keep the collapse calculation separate from diagnostics
+
+**Decision:** Keep the reusable Zhang--Paxton latitude reduction as direct
+NumPy functions returning ordinary dictionaries. Keep MLT diagnostic
+sampling, plots, figure output, and the command line interface in the
+diagnostic script.
+
+**Rationale:** The previous 1,065-line package module combined the scientific
+calculation with three dataclasses, extensive type machinery, four figure
+products, internal checks, and CLI handling. That obscured the short
+scientific sequence a student needs to inspect. The separated code retains
+meaningful domain and shape checks and batching of the expensive model
+evaluation, while old/new numerical comparisons confirm that the scientific
+outputs and bundled lookup did not change.
+
+## 2026-07-30 — Use a one-sided conductance uncertainty at zero flux
+
+**Decision:** When proton subtraction clips electron energy flux to zero,
+report dP and dH as the conductance reached at the one-sigma upper flux
+`Fe=dFe`.
+
+**Rationale:** Robinson conductance is proportional to `sqrt(Fe)`, making its
+flux derivative singular at `Fe=0`. Linear propagation is therefore undefined
+at that physical boundary. The one-sided excursion is finite for every E0 and
+states directly what is being reported. E0 uncertainty contributes nothing at
+exactly zero flux because conductance is zero for every E0 there.
+
+## 2026-07-30 — Integrate definitive GFZ Kp and replace IMAGE E0
+
+**Decision:** Use the fixed definitive GFZ Kp series to select collapsed
+Zhang--Paxton E0/dE0 for every retained IMAGE frame. Keep the current
+three-camera population and SI13 diagnostics during the first comparison
+stage, but do not allow SI13 to affect E0 or Fe.
+
+**Rationale:** This implements the user's decision to replace the unvalidated
+WIC/SI13 energy inversion without simultaneously changing data support. Kp is
+matched to enclosing half-open three-hour intervals with no temporal
+interpolation or gap filling. The original GFZ thirds and rounded lookup layer
+are both preserved.
+
+Use the collapsed MLAT-profile spread as dE0 and describe it only as unresolved
+latitude variability. Propagate its induced first-order covariance with
+WIC-derived Fe through the Robinson relations. Do not invent Zhang--Paxton
+coefficient, Kp, or predictive uncertainties.
+
+The old ratio inversion remains only as an explicit regression/comparison
+path. Making SI13 optional is a later, separate decision. Electron
+mean-energy versus characteristic-energy compatibility remains a scientific
+gate before publication use.
+
+## 2026-07-30 — Use direct nearest-hundredth Kp lookup layers
+
+**Decision:** Store one directly evaluated collapse for every Kp value from
+0.00 through 9.00 in steps of 0.01. At runtime, round Kp to the nearest
+hundredth and select that layer without interpolation. Exact half values round
+upward.
+
+**Rationale:** The fixed 36-by-36 Cubed-Sphere grid makes the complete table
+small enough to bundle with the package. Direct hundredth-Kp layers remove the
+need for a second approximation after Zhang--Paxton's published Kp
+interpolation and the nonlinear Q-defined latitude selection. The two spatial
+axes are the grid's `(eta, xi)` indices; MLT remains a two-dimensional
+coordinate associated with those cells.
+
+The lookup stores only the representative area-weighted E0, profile-derived
+dE0, area-weighted median, direct grid coordinates, units, and scientific
+provenance. The loader checks the stored coordinates directly against the
+active grid. Generation remains parallelizable because a measured layer takes
+about 10.7 seconds, but the implementation uses the repository's ordinary
+`process_map` pattern rather than custom task, checkpoint, or version
+machinery.
 
 ## 2026-07-29 — Replace IMAGE-derived electron E0 and dE0
 

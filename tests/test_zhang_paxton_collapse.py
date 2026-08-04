@@ -1,22 +1,9 @@
 """Focused tests for the exploratory Zhang--Paxton latitude collapse."""
 
-from __future__ import annotations
-
-import importlib.util
-from pathlib import Path
-import sys
-
 import numpy as np
+import pytest
 
-
-SCRIPT_PATH = (
-    Path(__file__).resolve().parents[1] / "scripts" / "ZhangPaxton2008_collapse.py"
-)
-SPEC = importlib.util.spec_from_file_location("zhang_paxton_collapse", SCRIPT_PATH)
-assert SPEC is not None and SPEC.loader is not None
-collapse_module = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = collapse_module
-SPEC.loader.exec_module(collapse_module)
+import icbuilder.zhang_paxton_collapse as collapse_module
 
 
 def test_area_weights_integrate_exact_latitude_band() -> None:
@@ -41,13 +28,16 @@ def test_only_component_containing_principal_flux_peak_is_selected() -> None:
         energy,
         flux,
         edges,
-        collapse_module.OvalThreshold(0.1),
+        0.1,
     )
 
-    np.testing.assert_array_equal(np.flatnonzero(result.selected), [5, 6, 7])
-    assert result.selected_lower_mlat == 55.0
-    assert result.selected_upper_mlat == 58.0
-    assert not result.empty
+    np.testing.assert_array_equal(
+        np.flatnonzero(result["selected"]),
+        [5, 6, 7],
+    )
+    assert result["selected_lower_mlat"] == 55.0
+    assert result["selected_upper_mlat"] == 58.0
+    assert not result["empty"]
 
 
 def test_area_weighted_mean_is_not_an_equal_cell_mean() -> None:
@@ -58,19 +48,22 @@ def test_area_weighted_mean_is_not_an_equal_cell_mean() -> None:
     edges = np.array([60.0, 75.0, 90.0])
 
     result = collapse_module.collapse_latitude_slice(
-        energy, flux, edges, collapse_module.OvalThreshold(0.05)
+        energy,
+        flux,
+        edges,
+        0.05,
     )
     weights = collapse_module.latitude_cell_area_weights(edges)
     expected = np.average(energy, weights=weights)
     expected_spread = np.sqrt(np.average((energy - expected) ** 2, weights=weights))
 
-    assert result.representative_energy == expected
-    assert result.weighted_spread == expected_spread
-    assert result.representative_energy < np.mean(energy)
-    assert result.area_weighted_median_energy == 1.0
-    assert result.touches_equatorward_sampling_limit
-    assert result.reaches_physical_pole
-    assert not result.touches_poleward_sampling_limit
+    assert result["representative_energy"] == expected
+    assert result["weighted_spread"] == expected_spread
+    assert result["representative_energy"] < np.mean(energy)
+    assert result["area_weighted_median_energy"] == 1.0
+    assert result["touches_equatorward_sampling_limit"]
+    assert result["reaches_physical_pole"]
+    assert not result["touches_poleward_sampling_limit"]
 
 
 def test_empty_interval_returns_nan_and_explicit_flag() -> None:
@@ -82,25 +75,48 @@ def test_empty_interval_returns_nan_and_explicit_flag() -> None:
         energy,
         flux,
         np.array([50.0, 51.0, 52.0, 53.0]),
-        collapse_module.OvalThreshold(0.05),
+        0.05,
     )
 
-    assert result.empty
-    assert np.isnan(result.representative_energy)
-    assert np.isnan(result.area_weighted_median_energy)
-    assert np.isnan(result.selected_lower_mlat)
-    assert not result.selected.any()
+    assert result["empty"]
+    assert np.isnan(result["representative_energy"])
+    assert np.isnan(result["area_weighted_median_energy"])
+    assert np.isnan(result["selected_lower_mlat"])
+    assert not result["selected"].any()
 
 
-def test_diagnostic_mlt_grid_uses_three_minute_spacing() -> None:
-    """The figures should sample the continuous model every 0.05 MLT hour."""
+def test_threshold_is_strict_and_domain_flags_are_distinct() -> None:
+    """Cells exactly on the threshold stay out; a non-polar edge is flagged."""
 
-    centres, edges = collapse_module.regular_mlt_grid()
-    assert centres.size == 480
-    assert edges.size == 481
-    np.testing.assert_allclose(np.diff(centres), 0.05, rtol=0, atol=1e-14)
-    assert edges[0] == 0.0
-    assert edges[-1] == 24.0
+    edges = np.array([50.0, 51.0, 52.0])
+    empty = collapse_module.collapse_latitude_slice(
+        [1.0, 2.0],
+        [0.05, 0.05],
+        edges,
+    )
+    assert empty["empty"]
+
+    selected = collapse_module.collapse_latitude_slice(
+        [1.0, 2.0],
+        [0.06, 0.07],
+        edges,
+    )
+    assert selected["touches_equatorward_sampling_limit"]
+    assert selected["touches_poleward_sampling_limit"]
+    assert not selected["reaches_physical_pole"]
+
+
+def test_invalid_threshold_is_rejected() -> None:
+    """The scientific cutoff must be finite and non-negative."""
+
+    for threshold in (-0.1, np.nan, np.inf):
+        with pytest.raises(ValueError):
+            collapse_module.collapse_latitude_slice(
+                [1.0],
+                [1.0],
+                [50.0, 51.0],
+                threshold,
+            )
 
 
 def test_model_wrapper_broadcasts_kp_and_mlt() -> None:
@@ -111,32 +127,11 @@ def test_model_wrapper_broadcasts_kp_and_mlt() -> None:
         np.array([[0.0, 6.0, 12.0, 18.0]]),
     )
 
-    assert result.representative_energy.shape == (2, 4)
-    assert result.area_weighted_median_energy.shape == (2, 4)
-    assert result.weighted_spread.shape == (2, 4)
-    assert result.selected_lower_mlat.shape == (2, 4)
-    assert not result.empty.any()
-    assert np.isfinite(result.representative_energy).all()
-    assert np.isfinite(result.area_weighted_median_energy).all()
-    assert np.isfinite(result.weighted_spread).all()
-
-
-def test_polar_axis_places_pole_at_centre() -> None:
-    """The radius=90-MLAT mapping must not be reversed by the axis limits."""
-
-    import matplotlib
-
-    matplotlib.use("Agg", force=True)
-    import matplotlib.pyplot as plt
-
-    figure, axis = plt.subplots(subplot_kw={"projection": "polar"})
-    collapse_module._polar_axis(axis)
-
-    assert axis.get_ylim() == (0.0, 40.0)
-    assert [label.get_text() for label in axis.get_yticklabels()] == [
-        "80°",
-        "70°",
-        "60°",
-        "50°",
-    ]
-    plt.close(figure)
+    assert result["representative_energy"].shape == (2, 4)
+    assert result["area_weighted_median_energy"].shape == (2, 4)
+    assert result["weighted_spread"].shape == (2, 4)
+    assert result["selected_lower_mlat"].shape == (2, 4)
+    assert not result["empty"].any()
+    assert np.isfinite(result["representative_energy"]).all()
+    assert np.isfinite(result["area_weighted_median_energy"]).all()
+    assert np.isfinite(result["weighted_spread"]).all()

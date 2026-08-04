@@ -10,3 +10,6 @@ dependencies = []
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["icbuilder"]
+
+[tool.setuptools.package-data]
+icbuilder = ["data/*.nc", "data/*.json", "data/*.md"]

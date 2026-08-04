@@ -4,7 +4,6 @@ from os.path import join as pjoin
 from pathlib import Path
 import numpy as np
 import glob
-from secsy import CSgrid, CSprojection
 from netCDF4 import Dataset
 from datetime import datetime, timedelta
 import apexpy
@@ -12,6 +11,8 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map  # tqdm-compatible multiprocessing
 from functools import partial
 from icbuilder import PreImage, BinnedImage, ConductanceImage
+from icbuilder.grids import make_image_grids
+from icbuilder.kp import load_gfz_kp, match_gfz_kp
 import argparse
 from apexpy.helpers import subsol
 
@@ -67,7 +68,17 @@ def safe_apex_convert(apex, ti, glat_row, glon_row, height=110):
         mlt[valid] = (180 + np.float64(mlon_valid) - ssalon) / 15 % 24
     return mlat, mlon, mlt, ssalon
 
-def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_thres=0.1):
+def process_orbit(
+    orbit,
+    p_wic_nc,
+    p_s12_nc,
+    p_s13_nc,
+    p_out,
+    grid_w,
+    grid_s,
+    kp_series,
+    f_thres=0.1,
+):
     #try:
     # Load nc orbit files
     wic_nc = Dataset(pjoin(p_wic_nc, f'wic_or{orbit:04d}.nc'), 'r')
@@ -121,12 +132,25 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     s12_pI.discard(f)
     s13_pI.discard(f)
 
+    # GFZ timestamps mark the start of each three-hour interval. Match only
+    # the final IMAGE frame population that will enter this orbit product.
+    frame_kp = match_gfz_kp(t, kp_series)
+
         # Bin and conductance images
     losc = True
     wic_bI = BinnedImage(wic_pI, grid_w, inflate_uncertainty=True, correction='SH', los_correction=losc)
     s12_bI = BinnedImage(s12_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG', los_correction=losc)
     s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG', los_correction=losc)
-    cI = ConductanceImage(wic_bI, s12_bI, s13_bI, time=t)
+    cI = ConductanceImage(
+        wic_bI,
+        s12_bI,
+        s13_bI,
+        time=t,
+        kp=frame_kp["kp"],
+        kp_interval_start=frame_kp["interval_start"],
+        kp_provenance=kp_series["provenance"],
+        energy_method="image_ratio",
+    )
         # Save to netCDF
     out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
     cI.to_nc(out_path)
@@ -135,7 +159,18 @@ def process_orbit(orbit, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, f_
     #    print(f"Failed orbit {orbit}: {e}")
     #    return None
 
-def run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, parallel=True, n_processes=None):
+def run_all_orbits(
+    o,
+    p_wic_nc,
+    p_s12_nc,
+    p_s13_nc,
+    p_out,
+    grid_w,
+    grid_s,
+    kp_series,
+    parallel=True,
+    n_processes=None,
+):
 
     kwargs = {
             'p_wic_nc': p_wic_nc,
@@ -144,6 +179,7 @@ def run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, paral
             'p_out': p_out,
             'grid_w': grid_w,  # must be defined in your namespace
             'grid_s': grid_s,  # must be defined in your namespace
+            'kp_series': kp_series,
             'f_thres': 0.1
             }
     
@@ -177,25 +213,6 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-parser = argparse.ArgumentParser(description="Process FUV data.")
-parser.add_argument('--parallel', type=str2bool, default=False, help='Run in parallel (default False)')
-parser.add_argument('--pool_size', type=int, default=96, help='Size of pool (default 10)')
-parser.add_argument('--base', type=str,
-                    default=str(pjoin(Path(__file__).resolve().parents[1], 'example_data')),
-                    help='Base data directory')
-
-parallel = parser.parse_args().parallel
-pool_size = parser.parse_args().pool_size
-base = parser.parse_args().base
-
-p_wic_nc = pjoin(base, 'wic')
-p_s12_nc = pjoin(base, 's12')
-p_s13_nc = pjoin(base, 's13')
-
-p_out = pjoin(base, 'conductance')
-
-#%% Fetch orbits available in all nc files
-
 def get_orbit_list(p_nc, p_npy, sensor):
     # Fetch all orbits
     o = np.array([int(o[-7:-3]) for o in sorted(glob.glob(pjoin(p_nc, '*.nc')))])
@@ -208,36 +225,85 @@ def get_orbit_list(p_nc, p_npy, sensor):
     # Grab orbits
     return o[np.isin(o, avail)]
 
-o_wic = get_orbit_list(p_wic_nc, pjoin(base, 'wic_avail_orbit.npy'), 'WIC')
-o_s12 = get_orbit_list(p_s12_nc, pjoin(base, 's12_avail_orbit.npy'), 'S12')
-o_s13 = get_orbit_list(p_s13_nc, pjoin(base, 's13_avail_orbit.npy'), 'S13')
-
-# Create list of all overlapping orbits
-o = set(o_wic) & set(o_s12) & set(o_s13)
-
-print(f'There are {len(list(o))} common orbtis between WIC, S12, and S13\n')
-
-#%% Define grids
-
-position = (0, 90) # lon, lat
-orientation = (0, 1) # east, north
-L, Lres = 20000e3, 225e3
-grid_w = CSgrid(CSprojection(position, orientation), L, L, Lres, Lres, R = 6481.2e3)
-
-target_Lres = 450e3
-dist = grid_w.Lres*grid_w.shape[0]
-steps = np.round(dist / target_Lres).astype(int)
-xi_e = np.linspace(grid_w.xi_mesh[0, :][0], grid_w.xi_mesh[0, :][-1], steps+1)
-eta_e = np.linspace(grid_w.eta_mesh[:, 0][0], grid_w.eta_mesh[:, 0][-1], steps+1)
-Lres = dist / steps
-grid_s = CSgrid(CSprojection(position, orientation), L, L, Lres, Lres, edges = (xi_e, eta_e), R = 6481.2e3)
-print('Fine grid resolution is: ' + str(grid_w.Lres/1e3) + ' km')
-print('Coarse grid target resolution is: ' + str(target_Lres/1e3) + ' km')
-print('Coarse grid resolution set to: ' + str(np.round(Lres/1e3, 2)) + ' km')
-print('Coarse grid resolution is : ' + str(grid_s.Lres/1e3) + ' km\n')
-
-#%%
-
-results = run_all_orbits(o, p_wic_nc, p_s12_nc, p_s13_nc, p_out, grid_w, grid_s, parallel=parallel, n_processes=pool_size)
+def data_paths(base, wic_folder='wic', s12_folder='s12',
+               s13_folder='s13', output_folder='conductance'):
+    """Return the three input directories and output directory under *base*."""
+    base = Path(base).expanduser()
+    return {
+        'base': base,
+        'wic': base / wic_folder,
+        's12': base / s12_folder,
+        's13': base / s13_folder,
+        'output': base / output_folder,
+    }
 
 
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Process FUV data.")
+    parser.add_argument('--parallel', type=str2bool, default=False,
+                        help='Run in parallel (default False)')
+    parser.add_argument('--pool_size', type=int, default=96,
+                        help='Number of orbit workers (default 96)')
+    parser.add_argument(
+        '--base', type=Path,
+        default=Path(__file__).resolve().parents[1] / 'example_data',
+        help='Base directory containing the input and output folders',
+    )
+    parser.add_argument('--wic-folder', default='wic',
+                        help='WIC folder name under --base (default wic)')
+    parser.add_argument('--s12-folder', default='s12',
+                        help='SI12 folder name under --base (default s12)')
+    parser.add_argument('--s13-folder', default='s13',
+                        help='SI13 folder name under --base (default s13)')
+    parser.add_argument('--output-folder', default='conductance',
+                        help='Output folder name under --base (default conductance)')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    paths = data_paths(
+        args.base,
+        args.wic_folder,
+        args.s12_folder,
+        args.s13_folder,
+        args.output_folder,
+    )
+
+    # The availability arrays always live directly under the base directory.
+    o_wic = get_orbit_list(
+        paths['wic'], paths['base'] / 'wic_avail_orbit.npy', 'WIC')
+    o_s12 = get_orbit_list(
+        paths['s12'], paths['base'] / 's12_avail_orbit.npy', 'S12')
+    o_s13 = get_orbit_list(
+        paths['s13'], paths['base'] / 's13_avail_orbit.npy', 'S13')
+
+    # Create list of all overlapping orbits.
+    orbits = set(o_wic) & set(o_s12) & set(o_s13)
+    print(f'There are {len(orbits)} common orbits between WIC, S12, and SI13\n')
+
+    grid_w, grid_s = make_image_grids()
+    print('Fine grid resolution is: ' + str(grid_w.Lres/1e3) + ' km')
+    print('Coarse grid target resolution is: 450.0 km')
+    print('Coarse grid resolution is : ' + str(grid_s.Lres/1e3) + ' km\n')
+
+    # Load the fixed local Kp source once. Orbit workers never contact GFZ.
+    kp_series = load_gfz_kp()
+
+    paths['output'].mkdir(parents=True, exist_ok=True)
+    return run_all_orbits(
+        orbits,
+        paths['wic'],
+        paths['s12'],
+        paths['s13'],
+        paths['output'],
+        grid_w,
+        grid_s,
+        kp_series,
+        parallel=args.parallel,
+        n_processes=args.pool_size,
+    )
+
+
+if __name__ == '__main__':
+    main()

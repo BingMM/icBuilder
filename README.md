@@ -21,6 +21,8 @@ For repository-specific operating guidance and technical continuity, start with
 
 - [`fuvpy`](https://github.com/aohma/fuvpy) – for FUV image processing **[3]**
 - [`secsy`](https://github.com/klaundal/secsy) - for cubed sphere grid generation
+- `ZhangPaxton2008` - for generating the bundled electron-energy lookup
+- `netCDF4` - for lookup and conductance-product serialization
 - [`tqdm`](https://github.com/tqdm/tqdm) – for progress bars (optional; can be removed with minor edits)
 - [`icReader`](https://github.com/BingMM/icReader) - for reading conductance output files (optional; used for creating conductance figures)
 
@@ -56,9 +58,79 @@ The code is designed to be run in the following sequence:
 - Uses the trade-off between standard error and the number of bins with ≥30 measurements (lower limit of the central limit theorem).
 - Suggested resolution: 225 km for WIC, 450 km for SI12 and SI13.
 
+### `make_zhang_paxton_lookup.py`
+
+- Builds the collapsed Zhang--Paxton electron-energy lookup on the canonical
+  36-by-36 WIC Cubed-Sphere grid.
+- Stores `E0` and the latitude-profile spread `dE0` for Kp 0.00 through 9.00
+  in steps of 0.01.
+- Uses dimensions `(kp, eta, xi)` because MLT is a two-dimensional coordinate
+  on the Cubed-Sphere grid.
+
+Generate the bundled table from the repository root:
+
+```bash
+python scripts/make_zhang_paxton_lookup.py --workers 1
+```
+
+Load one or more Kp levels:
+
+```python
+from icbuilder import load_zhang_paxton_lookup
+
+lookup = load_zhang_paxton_lookup(1.519)  # Uses the Kp=1.52 layer.
+E0 = lookup["E0"]
+dE0 = lookup["dE0"]
+```
+
+Kp is rounded to the nearest hundredth; the loader does not interpolate
+between table layers. Exact half values round upward. Scalar input returns
+36-by-36 arrays, while an array of Kp values returns `(time, 36, 36)` arrays.
+The returned dictionary also contains `E0_median`, the selected `kp`, and the
+two-dimensional `mlt`, `xi`, and `eta` coordinates.
+
 ### `make_conductance_orbit_files.py`
 
 - Ingests the NetCDF files and estimates ionospheric conductance **[1,2,4]**.
+- Loads the bundled definitive GFZ Kp series once, matches each final IMAGE
+  frame to its enclosing three-hour interval, and selects the corresponding
+  Zhang--Paxton lookup layer.
+- Uses Zhang--Paxton E0 and the collapsed latitude-profile spread dE0 in place
+  of the WIC/SI13 energy inversion. SI13 remains in the stage-1 common-frame
+  population and ratio diagnostics, but does not affect E0 or Fe.
+- Stores the original GFZ Kp, rounded lookup Kp, Kp interval start, source
+  provenance, E0--Fe covariance, and lookup/collapse provenance.
+
+Input and output folder names default to `wic`, `s12`, `s13`, and
+`conductance` under `--base`, but can be changed independently. For example,
+the Chapman server directories are selected with:
+
+```bash
+python scripts/make_conductance_orbit_files.py --base ~/IMAGE_FUV \
+    --wic-folder =wic --s12-folder =s12 --s13-folder =s13 \
+    --output-folder =conductance --parallel False
+```
+
+The bundled `icbuilder/data/gfz_kp_2000_2001.json` is the unchanged response
+from the official GFZ JSON API for 2000--2001. It is definitive (`status=def`)
+Kp distributed under CC BY 4.0 with DOI `10.5880/Kp.0001`. See
+`icbuilder/data/README.md` for the exact query and acquisition record.
+The loader verifies the recorded SHA-256 before parsing the file.
+
+The pipeline interprets the orbit files' timezone-free frame datetimes as UTC.
+GFZ timestamps mark interval starts, so a frame at exactly 03:00 uses the
+03:00--06:00 Kp value. Time interpolation, nearest matching, gap filling, and
+out-of-range clipping are not used. `ConductanceImage` checks again that every
+frame is inside the Kp interval serialized with it.
+
+If proton subtraction clips electron energy flux to zero, the derivative of
+the Robinson conductance with respect to flux is singular. In that case dP
+and dH are reported as the one-sided conductance excursions from `Fe=0` to
+`Fe=dFe`, rather than using linear uncertainty propagation.
+
+The scientific compatibility of Zhang--Paxton electron mean energy with the
+energy quantity assumed by the WIC response and Robinson relations remains an
+unresolved publication gate.
 
 ### `make_conductance_figures.py`
 

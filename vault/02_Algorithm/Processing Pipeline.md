@@ -1,6 +1,6 @@
 # Processing Pipeline
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-30
 
 This note records the durable high-level workflow visible in the README and
 live code. It is orientation, not a claim that the full production dataset was
@@ -26,7 +26,16 @@ reproduced during the review.
 4. **Conductance construction**
    `scripts/make_conductance_orbit_files.py` time-aligns the three instruments,
    removes empty or low-coverage frames, converts coordinates, grids the
-   observations, and builds a `ConductanceImage`.
+   observations, matches each retained frame to definitive GFZ Kp, and builds
+   a `ConductanceImage`.
+
+   The fixed Kp series is loaded once before orbit multiprocessing. Matching is
+   to the enclosing half-open interval `[start, start + 3 h)` after the final
+   fullness filter. Exact interval boundaries select the new value. Missing,
+   gapped, or out-of-range data fail; no interpolation or nearest matching is
+   used. Orbit-file datetimes have no timezone field and are explicitly
+   interpreted as UTC. `ConductanceImage` independently checks that each frame
+   lies in the half-open interval stored with it.
 
    The current uncommitted `BinnedImage` path can apply the provisional
    pixel-level `cos(DZA)` normalization before calculating image statistics.
@@ -45,6 +54,9 @@ reproduced during the review.
    It also writes per-sensor `sza`, `dza`, and `los_factor` arrays with units.
    Root attributes record each sensor's source-image correction (`SH`, `DG`,
    or raw) and whether the pixel-level LOS correction was applied.
+   Each stage-1 product also stores original GFZ Kp, rounded lookup Kp, Kp
+   interval start, GFZ provenance, Zhang--Paxton lookup/collapse provenance,
+   dE0 interpretation, and the induced E0--Fe covariance.
 
 ## Secondary spline workflow
 
@@ -110,80 +122,94 @@ because a hard threshold on coarse cells made the collapsed curves visibly
 jitter as boundary cells entered and left the selection. This is numerical
 oversampling, not added physical resolution.
 
-### Integration boundary
+### Fixed-grid lookup
 
-Do not pass this result directly as `ConductanceImage.Ep`: that parameter is
-proton characteristic energy. Electron E0 is currently inferred from the
-corrected WIC/SI13 ratio, including hard-coded low-signal fallbacks.
-**Confirmed by the user:** comparison with DMSP did not reproduce the
-empirical WIC/SI13-to-E0 relation attributed to Frey et al. (2003). The
-integration target is therefore a complete replacement of IMAGE-derived E0
-and dE0, not a fallback or blend. Before implementation, confirm whether
-Zhang–Paxton mean energy is compatible with the energy quantity required by
-the WIC response and conductance equations.
+The collapse is now importable from
+`icbuilder/zhang_paxton_collapse.py`. It contains only the grid, spherical
+weights, contiguous-oval selection, and batched model reduction in execution
+order. Results are ordinary dictionaries rather than dataclass result
+objects. Diagnostic MLT sampling, plotting, figure saving, and the command
+line interface live separately in `scripts/ZhangPaxton2008_collapse.py`.
 
-If integration is approved, do not recompute the 0.01-degree latitude collapse
-for each IMAGE frame. The IMAGE products use a fixed 36-by-36 Cubed-Sphere
-grid with fixed MLT and MLAT at each cell. Precompute the selected
-representative energy for every supported Kp state and grid cell, store the
-scientific configuration with the table, and reduce frame-time evaluation to
-Kp lookup.
+`icbuilder/data/zhang_paxton_e0_lookup.nc` contains 901 direct Kp layers,
+0.00 through 9.00 at 0.01 spacing, on the canonical 36-by-36 WIC
+Cubed-Sphere grid. Its dimensions are `(kp, eta, xi)`. Cell-centre MLT is a
+two-dimensional coordinate calculated from `(grid.lon / 15) % 24`; neither
+Cubed-Sphere axis is a one-dimensional MLT axis.
 
-Because the present collapse deliberately removes MLAT dependence, each table
-cell would contain `E0(Kp, MLT_cell)`; cells sharing an MLT receive the same
-value. The cell MLAT would become relevant only if a future decision returned
-to the uncollapsed `E0(Kp, MLT, MLAT)` model.
+The stored scientific fields are the area-weighted mean E0, latitude-profile
+spread dE0, and area-weighted median E0. The file also records units, the
+two-dimensional grid coordinates, threshold, latitude domain and resolution,
+and ZhangPaxton2008 package version. The loader checks those coordinates
+directly against the canonical IMAGE grid.
 
-The user does not consider an additional automatic IMAGE precipitation mask
-robustly achievable, so do not make one an integration requirement. Evaluate
-the collapsed E0 on the fixed grid and let corrected WIC brightness carry the
-observed spatial structure into `Fe = Wprime / Wm(E0)`. Existing IMAGE
-coverage, background correction, and validity handling still apply, but they
-should not be reinterpreted as a newly inferred auroral-oval boundary. This
-means the product must be described honestly: its E0 is a Kp/MLT
-representative, while IMAGE determines where appreciable radiance-derived
-energy flux occurs.
+Runtime lookup rounds Kp to the nearest hundredth and performs direct indexing
+without interpolation; exact half values round upward. Scalar Kp produces
+36-by-36 arrays; a vector of frame Kp values produces `(time, 36, 36)` arrays.
+`load_zhang_paxton_lookup(kp)` returns a plain dictionary containing the
+selected Kp, E0, dE0, median E0, MLT, xi, and eta.
 
-The published Zhang–Paxton coefficients do not contain uncertainty or
-fit-covariance information. The existing collapse spread and threshold
-sensitivity do not recover that missing model-fit uncertainty. **Confirmed by
-the user:** do not introduce DMSP calibration. Define dE0 from the
-Zhang–Paxton latitude profile that is collapsed to form the mean. The existing
-`weighted_spread` return value is the direct candidate:
+The bundled table uses the still-provisional `Q > 0.05 mW m-2` selection over
+50--90 degrees at 0.01-degree numerical resolution. It contains no empty
+selections, but 231,123 of 1,167,696 cells touch the 50-degree equatorward
+sampling limit. A later change to the threshold or latitude domain requires
+regeneration.
 
-`dE0 = sqrt(sum(w * (E0_lat - E0_mean)^2) / sum(w))`,
+The simplified table schema was populated by copying the three scientific
+arrays from the previously verified table. All values and coordinates are
+exactly equal; this refactor did not repeat all 901 expensive collapses. Fresh
+direct-collapse checks at Kp 0.00, 1.52, and 9.00 agree to float32 precision.
 
-where `w` is the same exact spherical latitude-cell area used for the mean and
-the sum covers the same contiguous Q-selected interval. Do not divide this
-spread by the square root of the number of latitude samples: the 0.01-degree
-cells are numerical samples of one profile, not independent observations.
-This dE0 represents unresolved latitude variability created by collapsing
-away MLAT. It must not be described as Zhang–Paxton predictive uncertainty or
-coefficient error.
+### Stage-1 E0 integration
 
-The replacement calculation should conceptually be:
+`icbuilder/data/gfz_kp_2000_2001.json` is the unchanged official GFZ JSON
+response for the documented IMAGE interval. It contains 5,848 definitive
+three-hour values and is distributed under CC BY 4.0 with DOI
+`10.5880/Kp.0001`. The exact query, acquisition date, and checksum are recorded
+in `icbuilder/data/README.md`. The loader verifies that checksum before
+parsing; production processing never contacts GFZ.
 
-1. obtain `E0 = collapsed_ZP(Kp, MLT)` from the precomputed lookup;
-2. obtain `dE0` from the area-weighted spread of the same selected
-   Zhang–Paxton latitude profile;
-3. retain corrected IMAGE WIC brightness `Wprime` and calculate
-   `Fe = Wprime / Wm(E0)`;
-4. propagate WIC and E0 uncertainty through Fe and the Robinson conductance
-   equations.
+For each orbit, `ConductanceImage` requests the lookup once with the complete
+Kp vector. It validates the resulting `(time, 36, 36)` arrays and grid,
+retains original GFZ thirds separately from nearest-hundredth lookup values,
+and supplies each pixel's E0/dE0 to `E0_eflux_propagated`.
 
-Although Zhang–Paxton E0 is independent of the IMAGE count noise,
-`Fe = Wprime / Wm(E0)` makes the resulting E0 and Fe statistically dependent.
-The current conductance implementation sets their covariance to zero as a
-placeholder. A first-order implementation must include the derivative-induced
-covariance; an ensemble or Monte Carlo propagation through the response and
-conductance equations would represent the nonlinearity more faithfully.
+The override path retains SI12 proton-flux estimation, proton subtraction from
+WIC and SI13, WIC-derived Fe/dFe, and R/dR as diagnostics. It does not execute
+the WIC/SI13 ratio-to-E0 inversion. Consequently, finite SI13 changes cannot
+change E0 or Fe. The old inversion remains accessible only through the
+explicit `energy_method="image_ratio"` comparison path.
 
-Once E0 no longer comes from WIC/SI13, SI13 is not intrinsically required for
-electron-energy inference. Decide separately whether it remains in the
-pipeline for quality control, validity screening, or validation. This
-decision could change frame-availability requirements and product provenance;
-WIC remains the electron-brightness input and SI12 remains part of proton
-correction.
+The collapsed profile spread remains dE0:
+
+`dE0 = sqrt(sum(w * (E0_lat - E0_mean)^2) / sum(w))`.
+
+It represents unresolved MLAT variability, not Zhang--Paxton predictive,
+coefficient, or Kp uncertainty. Because `Fe = Wprime / Wm(E0)`, the
+first-order induced covariance is
+
+`cov(E0, Fe) = -Wprime * Wm'(E0) / Wm(E0)^2 * dE0^2`.
+
+The implementation passes this covariance to both Robinson uncertainty
+functions and stores it. It does not claim to complete the broader uncertainty
+model: shared-channel covariance and several upstream uncertainty terms remain
+unresolved.
+
+At `Fe=0`, the Robinson conductances are proportional to `sqrt(Fe)`, so their
+flux derivatives are singular and the usual linear uncertainty calculation is
+undefined. The stored dP and dH instead give the one-sided conductance change
+from `Fe=0` to `Fe=dFe`. E0 uncertainty contributes nothing at exactly zero
+flux because both conductances are then zero for every E0.
+
+Stage 1 deliberately retains the three-camera common-frame selection, SI13
+pixel support, combined weight, and ratio diagnostics. Making SI13 optional is
+a separate stage so comparison of old and new E0 does not also change frame
+population.
+
+The major scientific gate remains unresolved: Zhang--Paxton reports electron
+mean energy, while the IMAGE WIC response and Robinson calculation may assume
+a different characteristic-energy definition. The implemented path is ready
+for controlled testing, not yet publication-ready production.
 
 ### Proposed SI13 role after E0 replacement
 

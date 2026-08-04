@@ -1,17 +1,18 @@
 # Current State
 
-Last reviewed: 2026-07-29
-Repository snapshot: `main` at `8e509ea`
-Upstream state: aligned with `origin/main` before the uncommitted
-Zhang–Paxton-collapse work
+Last reviewed: 2026-07-31
+Repository snapshot: `main` at `d854016`
+Upstream state: uncommitted collapse, lookup, geometry, Kp, and E0-integration
+work
 
 ## Current position
 
-**Confirmed by the user:** the project has been reopened for a bounded
-Zhang–Paxton (2008) electron-energy reduction. The immediate purpose is to
-collapse `ZP(Kp, MLT, MLAT)` to one representative electron mean energy per
-`(Kp, MLT)` pair. Integration into the conductance pipeline is deliberately
-deferred.
+The first-stage Zhang–Paxton (2008) integration is implemented. The orbit
+pipeline now assigns definitive GFZ Kp to each final IMAGE frame and replaces
+the WIC/SI13-derived E0 and dE0 with the fixed-grid lookup. The stage keeps the
+existing three-camera common-frame population and SI13 ratio diagnostics so
+old and new products can be compared without simultaneously changing frame
+support.
 
 The current implementation and generated figures are uncommitted. A full
 read-only audit examined the live pipeline and five tracked example
@@ -31,8 +32,17 @@ causal boundary. See [[Audit - 2026-07-29]].
 
 - The repository processes IMAGE WIC, SI12, and SI13 data into Hall and
   Pedersen conductance estimates with propagated uncertainties.
-- `scripts/ZhangPaxton2008_collapse.py` now provides a reusable, documented
-  latitude collapse and a headless figure-generation CLI.
+- `icbuilder/zhang_paxton_collapse.py` provides the reusable documented
+  latitude collapse as direct NumPy calculations returning ordinary
+  dictionaries. Diagnostic plotting and the command-line entry point are
+  separate in `scripts/ZhangPaxton2008_collapse.py`.
+- The collapse refactor reduced the reusable scientific module from 1,065 to
+  306 lines and removed three dataclasses, array type machinery, plotting,
+  and command-line code from it. The four existing diagnostic figure sets
+  remain reproducible from the separate script.
+- Old and refactored collapse outputs agree exactly for scalar, broadcast,
+  broad Kp/MLT, both threshold, empty-selection, non-finite, and sampling-edge
+  cases. The bundled lookup file is byte-for-byte unchanged.
 - The collapse selects the contiguous Q-above-threshold component containing
   the principal Q maximum, then uses exact spherical latitude-cell weights
   proportional to `sin(latitude_upper) - sin(latitude_lower)`.
@@ -56,16 +66,69 @@ causal boundary. See [[Audit - 2026-07-29]].
   Cubed-Sphere grid with fixed MLT/MLAT coordinates, so the representative
   energy should be precomputed once on that grid for each Kp state and used as
   a lookup table.
-- Ten focused tests pass in `tConductance`: seven Zhang–Paxton-collapse tests,
-  two binned viewing-geometry tests, and one ConductanceImage NetCDF
-  round-trip test. All 29 Python files under
-  `icbuilder/`, `scripts/`, and `tests/` pass AST parsing.
-- Four explanatory figure sets were generated as PNG and PDF under
-  `figures/` and visually inspected. The fourth is a direct companion to the
-  collapsed-mean result and maps the profile-derived dE0 (`weighted_spread`)
-  over Kp/MLT with the same threshold-sensitivity layout. The polar-map
-  regression test requires 90 degrees at the centre and 50 degrees at the
-  outer edge. SVG is not generated.
+- The lookup is implemented and bundled as an 8.4-MB NetCDF table with
+  dimensions `(901 Kp, 36 eta, 36 xi)`. It contains direct collapsed layers
+  for Kp 0.00--9.00 at 0.01 spacing. The loader rounds input Kp to the nearest
+  hundredth, performs no interpolation, and directly checks the table's
+  two-dimensional coordinates against the active grid.
+- The lookup code was simplified for a small scientific codebase. Generation
+  is a visible Kp loop with optional `process_map`; the loader is one function
+  returning an ordinary dictionary. The NetCDF stores only Kp, grid
+  coordinates, E0, dE0, median E0, units, and scientific provenance.
+- The simplified table was made by copying the three previously verified
+  scientific arrays into the smaller schema, not by rerunning all 901 costly
+  latitude collapses. Every stored value and coordinate is exactly equal to
+  the previous table. Fresh direct collapses at Kp 0.00, 1.52, and 9.00 agree
+  at the expected float32 precision (maximum tested difference
+  `2.4e-7 keV`).
+- MLT is correctly retained as a two-dimensional grid coordinate:
+  `(grid.lon / 15) % 24`. A native `(xi, eta)` diagnostic shows the MLT,
+  E0, and dE0 fields together.
+- All 36 focused tests pass. They cover the collapse, lookup and grid,
+  definitive-Kp integrity and boundary matching, paired E0 override, SI13
+  invariance, induced covariance, zero-flux Robinson propagation, geometry,
+  and NetCDF provenance. Selected Kp=1.52 lookup cells agree with direct
+  collapse values to float32 storage precision.
+- A serial orbit-0085 run completed in an isolated `/tmp` output in 21
+  seconds. It retained the old 20-frame shape, assigned original Kp 2.667 and
+  4.333 to lookup layers 2.67 and 4.33, and produced 18,958 finite E0 pixels.
+  Every finite E0 exactly equalled its selected lookup value; all corresponding
+  covariance values were finite, with zeros only where WIC-derived Fe was
+  zero. Tracked example products were not modified.
+- The lookup contains no empty selections. Under its provisional
+  `Q > 0.05 mW m-2`, 50--90-degree configuration, 231,123 of 1,167,696 table
+  cells touch the 50-degree equatorward sampling limit. The table therefore
+  works technically but does not settle the production latitude-domain
+  decision.
+- The bundled unchanged GFZ JSON response contains all 5,848 definitive
+  three-hour Kp intervals from 2000-01-01 00:00 through 2001-12-31 21:00 UTC.
+  It records source, status, DOI `10.5880/Kp.0001`, CC BY 4.0 licence, exact
+  query, acquisition date, and checksum. Orbit processing uses only this local
+  copy. The loader verifies the recorded SHA-256 before parsing it.
+- IMAGE frame times are matched to half-open Kp intervals
+  `[start, start + 3 h)`. Exact three-hour and midnight boundaries select the
+  new interval. Gaps and out-of-range frames fail instead of being
+  interpolated, filled, or clipped. The timezone-free IMAGE times are
+  explicitly interpreted as UTC.
+- `ConductanceImage` loads all requested lookup layers once per orbit,
+  validates the `(time, 36, 36)` shape and grid, and preserves both original
+  thirds-valued GFZ Kp and nearest-hundredth lookup Kp. It also verifies that
+  every frame time lies within its serialized half-open three-hour interval.
+- The count conversion accepts E0/dE0 only as a pair. Under the override it
+  retains SI12 proton correction, WIC proton subtraction, Fe and dFe
+  propagation, and SI13 R/dR diagnostics, while skipping the ratio-to-E0
+  inversion. Finite SI13 changes therefore do not change E0 or Fe.
+- The first-order covariance induced by `Fe = Wprime / Wm(E0)` is now
+  calculated as
+  `-Wprime * Wm'(E0) / Wm(E0)^2 * dE0^2`, passed to both Robinson uncertainty
+  functions, and serialized. It does not add model-coefficient or Kp
+  uncertainty.
+- At zero Fe, the Robinson flux derivative is singular. dP and dH are now
+  defined as one-sided conductance excursions from `Fe=0` to `Fe=dFe`. This
+  remains finite below, at, and above the former 4-keV Pedersen singularity.
+- All 41 Python files under `icbuilder/`, `scripts/`, and `tests/` pass AST
+  parsing. The four collapse figure sets and the native-grid lookup diagnostic
+  were visually inspected.
 - On the diagnostic grid Kp 0–9 by 0.05-hour MLT (4,800 slices), using
   0.01-degree MLAT cells over 50–90 degrees, the default rule produced no
   empty slices. It reached the 50-degree equatorward sampling limit in 1,001
@@ -149,11 +212,9 @@ causal boundary. See [[Audit - 2026-07-29]].
   observed corrected SI13. Do not invert that comparison to modify E0 or make
   SI13 availability a prerequisite for every conductance frame. WIC remains
   necessary for electron brightness and SI12 for proton correction.
-- The current conductance path propagates scalar `dE0` and `dFe` through the
-  Robinson formulas but sets `var(E0, Fe)` to zero as a placeholder. Because
-  `Fe = Wprime / Wm(E0)`, replacing E0 does not make E0 and Fe independent.
-  Any Zhang–Paxton integration must preserve uncertainty and explicitly
-  calculate or sample that covariance.
+- Stage 2 remains separate: decide whether SI13 should become optional and
+  whether it can provide a useful validation product before changing common
+  frame selection, pixel support, or the combined weight.
 
 ## Other maintenance and verification gaps
 
@@ -171,8 +232,8 @@ causal boundary. See [[Audit - 2026-07-29]].
   configuration, unit, sample-count, and retrieval-status provenance for a
   forensic reconstruction.
 - `SplineImage.solverP` passes Hall uncertainty to the Pedersen solver. The
-  uncertainty chain also omits shared-channel covariance and hard-codes
-  E0–Fe covariance to zero.
+  uncertainty chain still omits shared-channel covariance beyond the newly
+  implemented E0–Fe term.
 - The full production pipeline and published dataset were not regenerated
   during this audit.
 

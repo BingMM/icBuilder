@@ -84,6 +84,20 @@ def fdFe(wprime, wm, dwprime, dwm):
     return np.sqrt( (dwprime/wm)**2 + (wprime*dwm/wm**2)**2 )
 
 
+def e0_fe_covariance(E0, Fe, dE0):
+    """Covariance induced because the WIC-derived Fe depends on E0.
+
+    At fixed proton-corrected WIC counts, Fe = Wprime / Wm(E0). The
+    first-order covariance is therefore
+
+        -Wprime * Wm'(E0) / Wm(E0)**2 * dE0**2.
+    """
+
+    Wm = fWm(E0)
+    Wprime = Fe * Wm
+    return -Wprime * fdWm_dE0(E0) / Wm**2 * dE0**2
+
+
 ## electron characteristic energy model
 if use_spline:
     #fE0m = UnivariateSpline(wic_to_s13*2,EE_ratio,**splinekw)
@@ -255,7 +269,9 @@ def E0_eflux_propagated(counts_list,
                         dayglowcounts_list,
                         dayglowcounts_unc,
                         Ep,dEp,
-                        clip=True):
+                        clip=True,
+                        E0=None,
+                        dE0=None):
     """
     E0, Fe, dE0, dFe = E0_eflux_propagated(counts_list,
                                            dayglowcounts_list,
@@ -273,11 +289,18 @@ def E0_eflux_propagated(counts_list,
     dayglowcounts_unc  : List of dayglow model count uncertainties for WIC, SI-12, and SI-13
     Ep                 : Proton characteristic energy [keV]
     dEp                : Uncertainty in proton characteristic energy [keV]
+    E0, dE0            : Optional paired electron energy override [keV].
+                         When supplied, the WIC/SI13 ratio remains diagnostic
+                         but is not used to estimate electron energy.
 
     Outputs
     ======
     E0, Fe, dE0, dFe
     """
+
+    if (E0 is None) != (dE0 is None):
+        raise ValueError("E0 and dE0 must be supplied together")
+    energy_override = E0 is not None
 
     W, T, S = counts_list
     dayglow_wic, dayglow_T, dayglow_si13 = dayglowcounts_list
@@ -330,16 +353,15 @@ def E0_eflux_propagated(counts_list,
         dR = fdR(Wprime,Sprime,dWprime,dSprime)
     
     ####################
-    # 3. Finally, estimate e- char energy and e- energy flux
-    # If S13 is low do something
-    if Sprime < 3 and Wprime < 50:
-        E0, dE0 = .2, .08
-    elif Sprime < 3:
-        E0, dE0 = 1, 25
-    else:
-        # Estimate e- characteristic energy
-        E0 = np.clip(fE0m(R),0,35)
-        dE0 = np.abs(fdE0m_dR(R) * dR)
+    # 3. Estimate electron energy unless it was supplied by another model.
+    if not energy_override:
+        if Sprime < 3 and Wprime < 50:
+            E0, dE0 = .2, .08
+        elif Sprime < 3:
+            E0, dE0 = 1, 25
+        else:
+            E0 = np.clip(fE0m(R),0,35)
+            dE0 = np.abs(fdE0m_dR(R) * dR)
 
     # Get predicted electron counts for WIC given E0 and assuming 1 mW/m² e- energy flux
     Wm = fWm(E0)
@@ -350,4 +372,3 @@ def E0_eflux_propagated(counts_list,
     dFe = fdFe(Wprime, Wm, dWprime, dWm)
         
     return E0, Fe, dE0, dFe, R, dR
-
