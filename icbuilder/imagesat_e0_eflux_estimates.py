@@ -120,7 +120,13 @@ if use_spline:
 
 if use_interp1d:
     # fCpwm = interp1d(PE,P1,kind='linear')
-    fCpwm = lambda x: np.clip(interp1d(PE,P1,kind='linear',fill_value='extrapolate')(x),0,None)
+    # Construct each response interpolator once.  These response tables never
+    # change during an orbit, so rebuilding a SciPy object for every image
+    # pixel only adds overhead to the scientific calculation.
+    _fCpwm_interp = interp1d(
+        PE, P1, kind='linear', fill_value='extrapolate'
+    )
+    fCpwm = lambda x: np.clip(_fCpwm_interp(x), 0, None)
     fdCpwm_dEp = lambda x: (fCpwm(x+0.05)-fCpwm(x-0.05))/0.1
 
 
@@ -140,7 +146,10 @@ if use_spline:
 
 if use_interp1d:
     # fCp13m = interp1d(PE,P3,kind='linear')
-    fCp13m = lambda x: np.clip(interp1d(PE,P3,kind='linear',fill_value='extrapolate')(x),0,None)
+    _fCp13m_interp = interp1d(
+        PE, P3, kind='linear', fill_value='extrapolate'
+    )
+    fCp13m = lambda x: np.clip(_fCp13m_interp(x), 0, None)
     fdCp13m_dEp = lambda x: (fCp13m(x+0.05)-fCp13m(x-0.05))/0.1
 
 def fdCp13m(Ep,dEp):
@@ -159,7 +168,10 @@ if use_spline:
 
 if use_interp1d:
     #fTm = interp1d(PE,P2,kind='linear')
-    fTm = lambda x: np.clip(interp1d(PE,P2,kind='linear',fill_value='extrapolate')(x),0,None)
+    _fTm_interp = interp1d(
+        PE, P2, kind='linear', fill_value='extrapolate'
+    )
+    fTm = lambda x: np.clip(_fTm_interp(x), 0, None)
 
     fdTm_dEp = lambda x: (fTm(x+0.05)-fTm(x-0.05))/0.1
 
@@ -171,6 +183,26 @@ def fdTm(Ep,dEp):
     dEp : Uncertainty in Ep            [keV]
     """
     return np.abs( fdTm_dEp(Ep) * dEp  )
+
+
+def proton_response(Ep, dEp):
+    """Evaluate the six orbit-invariant proton response quantities.
+
+    ``Ep`` and ``dEp`` are scalars for a complete ``ConductanceImage``.  The
+    response of each camera and its propagated model uncertainty therefore
+    need to be evaluated only once, rather than once for every valid pixel.
+    The ordinary dictionary keeps the names and physical roles visible where
+    the values are used by the scalar and vector calculations.
+    """
+
+    return {
+        'Tmodel': fTm(Ep),
+        'dTmodel': fdTm(Ep, dEp),
+        'Cpwm': fCpwm(Ep),
+        'dCpwm': fdCpwm(Ep, dEp),
+        'Cp13m': fCp13m(Ep),
+        'dCp13m': fdCp13m(Ep, dEp),
+    }
 
 ##############################
 ## TOTAL PREDICTED PROTON COUNTS IN EACH CAMERA GIVEN PROTON ENERGY FLUX
@@ -271,7 +303,8 @@ def E0_eflux_propagated(counts_list,
                         Ep,dEp,
                         clip=True,
                         E0=None,
-                        dE0=None):
+                        dE0=None,
+                        proton_response_values=None):
     """
     E0, Fe, dE0, dFe = E0_eflux_propagated(counts_list,
                                            dayglowcounts_list,
@@ -292,6 +325,10 @@ def E0_eflux_propagated(counts_list,
     E0, dE0            : Optional paired electron energy override [keV].
                          When supplied, the WIC/SI13 ratio remains diagnostic
                          but is not used to estimate electron energy.
+    proton_response_values : dict, optional
+                         Six response quantities returned by
+                         ``proton_response``. ``ConductanceImage`` supplies
+                         this cache because Ep and dEp are orbit-wide scalars.
 
     Outputs
     ======
@@ -315,9 +352,17 @@ def E0_eflux_propagated(counts_list,
         Tprime = np.clip(Tprime,0,None)
     dTprime = np.sqrt(T + ddayglow_T**2)
 
-    # Get predicted counts for SI-12 given 1 mW/m² proton energy flux
-    Tmodel = fTm(Ep)
-    dTmodel = fdTm(Ep,dEp)
+    # Get the camera responses to a 1 mW/m² proton energy flux.  Standalone
+    # callers may omit the cache; ConductanceImage calculates it once because
+    # Ep and dEp are constant across the whole orbit.
+    if proton_response_values is None:
+        proton_response_values = proton_response(Ep, dEp)
+    Tmodel = proton_response_values['Tmodel']
+    dTmodel = proton_response_values['dTmodel']
+    Cpwm = proton_response_values['Cpwm']
+    dCpwm = proton_response_values['dCpwm']
+    Cp13m = proton_response_values['Cp13m']
+    dCp13m = proton_response_values['dCp13m']
 
     # Estimate proton energy flux
     Fp = Tprime/Tmodel
@@ -325,11 +370,11 @@ def E0_eflux_propagated(counts_list,
 
     # Get predicted proton counts for WIC and SI-13 given 1 mW/m² proton energy flux and estimated proton energy flux Fp
 
-    proton_wic = fproton_wic(Ep,Fp)    # Denoted "Cpw" in Notability
-    dproton_wic = fdproton_wic(Ep,Fp,dEp,dFp)
+    proton_wic = Cpwm * Fp    # Denoted "Cpw" in Notability
+    dproton_wic = np.sqrt((Fp*dCpwm)**2 + (Cpwm*dFp)**2)
 
-    proton_si13 = fproton_si13(Ep,Fp) # Denoted "Cp13" in Notability
-    dproton_si13 = fdproton_si13(Ep,Fp,dEp,dFp)
+    proton_si13 = Cp13m * Fp  # Denoted "Cp13" in Notability
+    dproton_si13 = np.sqrt((Fp*dCp13m)**2 + (Cp13m*dFp)**2)
 
     ####################
     # 2. Isolate e- counts: Subtract dayglow and proton counts from WIC and SI-13

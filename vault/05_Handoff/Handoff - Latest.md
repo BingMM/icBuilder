@@ -1,8 +1,8 @@
 # Handoff - Latest
 
 Last updated: 2026-08-04
-Repository snapshot: `main` at `f2e8d5d`
-Worktree state: uncommitted verified `BinnedImage` serial optimizations,
+Repository snapshot: `main` at `6cba18d`
+Worktree state: uncommitted verified `ConductanceImage` serial optimizations,
 focused regression tests, and documentation
 
 ## Project state
@@ -64,6 +64,15 @@ count, and shares target-grid triangulations only among fields with identical
 non-NaN source masks. Fields with different missing-data support remain
 independent. Comments in the calculation explain the historical count, NaN,
 weight, and geometry semantics that must be preserved.
+
+`ConductanceImage` now calculates the combined weight and the six
+Ep/dEp-dependent proton response values once per orbit, and the immutable
+camera response tables use persistent interpolators. The Zhang--Paxton
+production path applies the same count correction, flux, covariance, and
+Robinson equations to masked float64 arrays. Its zero-flux mask preserves the
+one-sided dP/dH definition without evaluating singular derivatives. The
+historical `image_ratio` comparison remains scalar and reuses the same cached
+proton response.
 
 A subsequent full read-only audit did read the five tracked example
 conductance products and the representative raw/intermediate metadata. It did
@@ -162,6 +171,17 @@ Q-threshold boundary from producing the visible jitter present at
   fields were exactly equal. A full isolated orbit run improved from 25.83 to
   18.94 seconds, and the resulting 32-variable NetCDF file was byte-for-byte
   identical. Tracked example products were not modified.
+- After the ConductanceImage optimization, another isolated orbit-0085 run
+  improved from 18.84 to 7.52 seconds (2.51x). The complete 32-variable
+  NetCDF remained byte-for-byte identical. Maximum RSS changed from 349.2 to
+  349.5 MB. Under cProfile, `_compute_conductance` fell from 20.41 seconds and
+  208,538 SciPy interpolator constructions to 0.004 seconds and one cached
+  proton-response evaluation. Focused vector/scalar tests require exact E0,
+  dE0, Fe, R, covariance, P, H, weights, and NaN support; propagated
+  uncertainties permit only float64 roundoff. Across all orbit-0085 cells,
+  maximum absolute differences were `4.4e-16` for dFe, `2.9e-11` for dR, and
+  `1.8e-15` for both dP and dH; dR is large in magnitude near a small SI13
+  denominator, so this absolute difference is still last-place arithmetic.
 - The earlier four collapse figure sets remain valid; their polar orientation,
   threshold curves, and dE0 companion were visually checked previously.
 

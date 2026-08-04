@@ -108,6 +108,14 @@ count. When coarse SI fields are interpolated to the WIC grid, fields share a
 triangulation only when their non-NaN source cells are identical; fields with
 different missing-data patterns retain their own valid source cells.
 
+`ConductanceImage` evaluates the orbit-wide proton response and combined
+sensor weight once. The production Zhang--Paxton path then applies the count,
+flux, covariance, and Robinson equations to all supported cells as float64
+arrays. Separate zero- and nonzero-flux masks preserve the one-sided
+uncertainty definition without evaluating the singular derivative at zero.
+The historical `image_ratio` comparison remains scalar because its piecewise
+low-signal rules are not used by the production path.
+
 Input and output folder names default to `wic`, `s12`, `s13`, and
 `conductance` under `--base`, but can be changed independently. For example,
 the Chapman server directories are selected with:

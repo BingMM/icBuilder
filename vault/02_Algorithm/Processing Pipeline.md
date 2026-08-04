@@ -68,6 +68,15 @@ reproduced during the review.
    interval start, GFZ provenance, Zhang--Paxton lookup/collapse provenance,
    dE0 interpretation, and the induced E0--Fe covariance.
 
+   The combined sensor weight and the six camera proton-response quantities
+   that depend only on orbit-wide Ep/dEp are evaluated once. The production
+   Zhang--Paxton branch then evaluates all supported cells with masked float64
+   arrays. Cells missing any count or count uncertainty retain the same NaN
+   support as the scalar calculation. The zero-flux Robinson uncertainty is
+   evaluated on a separate mask, so the singular nonzero-flux derivative is
+   never evaluated at Fe=0. The old `image_ratio` branch deliberately remains
+   a scalar comparison path with the same cached proton response.
+
 ## Secondary spline workflow
 
 `scripts/make_spline_model_files.py` reads conductance products through

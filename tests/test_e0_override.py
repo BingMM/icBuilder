@@ -5,6 +5,7 @@ import pytest
 
 from icbuilder.imagesat_e0_eflux_estimates import E0_eflux_propagated
 from icbuilder.imagesat_e0_eflux_estimates import e0_fe_covariance, fWm
+from icbuilder.imagesat_e0_eflux_estimates import proton_response
 from icbuilder.robinson import hall, halluncertainty
 from icbuilder.robinson import ped, peduncertainty
 
@@ -43,6 +44,21 @@ def test_override_is_unchanged_and_fe_does_not_depend_on_si13():
     assert low_si13[1] == high_si13[1]
     assert low_si13[3] == high_si13[3]
     assert low_si13[4] != high_si13[4]
+
+
+def test_cached_proton_response_is_exactly_the_same_as_direct_evaluation():
+    """Caching orbit-wide Ep/dEp responses must not change scalar results."""
+
+    arguments = ([500.0, 10.0, 8.0], [0, 0, 0], [0.3, 0.2, 0.4], 2.0, 0.5)
+    direct = E0_eflux_propagated(*arguments, E0=2.345, dE0=0.456)
+    cached = E0_eflux_propagated(
+        *arguments,
+        E0=2.345,
+        dE0=0.456,
+        proton_response_values=proton_response(2.0, 0.5),
+    )
+
+    np.testing.assert_array_equal(cached, direct)
 
 
 def test_covariance_matches_a_finite_difference_at_fixed_wic_counts():

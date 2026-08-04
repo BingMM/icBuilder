@@ -1,8 +1,8 @@
 # Current State
 
 Last reviewed: 2026-08-04
-Repository snapshot: `main` at `f2e8d5d`
-Upstream state: uncommitted verified `BinnedImage` serial optimizations
+Repository snapshot: `main` at `6cba18d`
+Upstream state: uncommitted verified `ConductanceImage` serial optimizations
 
 ## Current position
 
@@ -184,6 +184,19 @@ causal boundary. See [[Audit - 2026-07-29]].
   shares SI-to-WIC triangulations only among fields with identical non-NaN
   source masks. A complete orbit-0085 scratch product remained byte-for-byte
   identical while elapsed time fell from 25.83 to 18.94 seconds locally.
+- `ConductanceImage` now computes the combined weight and orbit-invariant
+  proton responses once, reuses persistent camera-response interpolators, and
+  applies the Zhang--Paxton production equations as masked float64 arrays.
+  The `image_ratio` comparison remains scalar. On the same tracked orbit-0085
+  inputs, elapsed time fell from 18.84 to 7.52 seconds and the complete
+  32-variable NetCDF remained byte-for-byte identical. Profiled conductance
+  calculation time fell from 20.41 to 0.004 seconds; the before profile
+  included 208,538 repeated SciPy interpolator constructions. Maximum RSS was
+  effectively unchanged at 349.2 versus 349.5 MB. Full-orbit vector/scalar
+  comparison gave exact E0, dE0, Fe, R, covariance, P, H, weights, and NaN
+  patterns. Maximum uncertainty differences were `4.4e-16` (dFe), `2.9e-11`
+  (dR), and `1.8e-15` (dP/dH), all attributable to vector floating-point
+  evaluation order.
 
 ## Immediate scientific questions
 

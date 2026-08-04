@@ -10,6 +10,7 @@ from netCDF4 import Dataset
 # External dependencies
 from .imagesat_e0_eflux_estimates import E0_eflux_propagated as EF_fun
 from .imagesat_e0_eflux_estimates import e0_fe_covariance
+from .imagesat_e0_eflux_estimates import fdWm_dE0, fWm, proton_response
 from .robinson import ped, hall, peduncertainty, halluncertainty
 from .binnedimage import BinnedImage
 from .kp import _utc_datetime64
@@ -264,13 +265,175 @@ class ConductanceImage:
         self.varE0Fe = np.full(self.shape, np.nan)
 
     def _compute_conductance(self):
+        """Compute conductance by the selected electron-energy method.
+
+        Sensor weights and proton response coefficients are orbit-wide
+        invariants.  Calculate each once here instead of repeating the same
+        work for every grid cell.
         """
-        Loops through all pixels and computes conductance estimates.
-        """
+        self.w = (self.wic_w + self.s12_w + self.s13_w) / 3
+        self._proton_response = proton_response(self.Ep, self.dEp)
+
+        if self.energy_method == "zhang_paxton":
+            self._compute_zhang_paxton()
+            return
+
+        # Keep the historical WIC/SI13 inversion scalar.  It contains several
+        # piecewise low-signal rules and exists only as a comparison path; a
+        # second vector implementation would add regression risk without
+        # helping production throughput.
         for i in range(self.shape[0]):
             for j in range(self.shape[1]):
                 for k in range(self.shape[2]):
                     self._compute_pixel(i, j, k)
+
+    def _compute_zhang_paxton(self):
+        """Vectorized Zhang--Paxton count-to-conductance calculation.
+
+        The equations are the same as ``E0_eflux_propagated`` with the paired
+        E0/dE0 override.  Only cells whose three counts and three count
+        uncertainties are non-NaN enter the calculation, matching the former
+        scalar loop.  Working arrays are explicitly float64 so NumPy does not
+        inherit the lookup table's float32 storage precision during uncertainty
+        propagation.
+        """
+        W = np.asarray(self.wic_avg, dtype=np.float64)
+        T = np.asarray(self.s12_avg, dtype=np.float64)
+        S = np.asarray(self.s13_avg, dtype=np.float64)
+        dW = np.asarray(self.wic_std, dtype=np.float64)
+        dT = np.asarray(self.s12_std, dtype=np.float64)
+        dS = np.asarray(self.s13_std, dtype=np.float64)
+
+        valid = ~(
+            np.isnan(W) | np.isnan(T) | np.isnan(S)
+            | np.isnan(dW) | np.isnan(dT) | np.isnan(dS)
+        )
+        if not np.any(valid):
+            return
+
+        # Work only on supported cells.  This avoids filling invalid IMAGE
+        # regions with lookup-table E0 values and preserves their NaN support.
+        W = W[valid]
+        T = T[valid]
+        S = S[valid]
+        dW = dW[valid]
+        dT = dT[valid]
+        dS = dS[valid]
+        E0 = np.asarray(self.lookup_E0[valid], dtype=np.float64)
+        dE0 = np.asarray(self.lookup_dE0[valid], dtype=np.float64)
+
+        response = self._proton_response
+        Tmodel = response['Tmodel']
+        dTmodel = response['dTmodel']
+        Cpwm = response['Cpwm']
+        dCpwm = response['dCpwm']
+        Cp13m = response['Cp13m']
+        dCp13m = response['dCp13m']
+
+        # SI12 measures the proton contribution.  Ep and dEp are constant for
+        # this ConductanceImage, while T and dT vary from cell to cell.
+        Tprime = np.clip(T, 0, None)
+        dTprime = np.sqrt(T + dT**2)
+        Fp = Tprime / Tmodel
+        dFp = np.sqrt(
+            (dTprime / Tmodel)**2
+            + (Tprime * dTmodel / Tmodel**2)**2
+        )
+
+        proton_wic = Cpwm * Fp
+        dproton_wic = np.sqrt((Fp*dCpwm)**2 + (Cpwm*dFp)**2)
+        proton_si13 = Cp13m * Fp
+        dproton_si13 = np.sqrt((Fp*dCp13m)**2 + (Cp13m*dFp)**2)
+
+        Wprime = np.clip(W - proton_wic, 0, None)
+        dWprime = np.sqrt(W + dW**2 + dproton_wic**2)
+        Sprime = np.clip(S - proton_si13, 0, None)
+        dSprime = np.sqrt(S + dS**2 + dproton_si13**2)
+
+        # The WIC/SI13 ratio is retained as a diagnostic.  Do not evaluate the
+        # divisions on zero corrected counts: np.where would evaluate both
+        # branches and needlessly create infinities before replacing them.
+        R = np.full(W.shape, np.nan, dtype=np.float64)
+        dR = np.full(W.shape, np.nan, dtype=np.float64)
+        ratio_valid = (Wprime != 0) & (Sprime != 0)
+        R[ratio_valid] = Wprime[ratio_valid] / Sprime[ratio_valid]
+        dR[ratio_valid] = np.sqrt(
+            (dWprime[ratio_valid] / Sprime[ratio_valid])**2
+            + (
+                Wprime[ratio_valid] * dSprime[ratio_valid]
+                / Sprime[ratio_valid]**2
+            )**2
+        )
+
+        # Zhang--Paxton supplies E0 and dE0.  WIC supplies the electron energy
+        # flux after subtraction of the SI12-derived proton contribution.
+        Wm = fWm(E0)
+        dWm = np.abs(fdWm_dE0(E0) * dE0)
+        Fe = Wprime / Wm
+        dFe = np.sqrt(
+            (dWprime / Wm)**2
+            + (Wprime * dWm / Wm**2)**2
+        )
+        varE0Fe = e0_fe_covariance(E0, Fe, dE0)
+
+        P = ped(E0, Fe)
+        H = hall(E0, Fe)
+        dP, dH = self._robinson_uncertainty(E0, Fe, dE0, dFe, varE0Fe)
+
+        self.E0[valid] = E0
+        self.dE0[valid] = dE0
+        self.Fe[valid] = Fe
+        self.dFe[valid] = dFe
+        self.R[valid] = R
+        self.dR[valid] = dR
+        self.varE0Fe[valid] = varE0Fe
+        self.P[valid] = P
+        self.H[valid] = H
+        self.dP[valid] = dP
+        self.dH[valid] = dH
+
+    @staticmethod
+    def _robinson_uncertainty(E0, Fe, dE0, dFe, varE0Fe):
+        """Vectorized Robinson uncertainties with the scalar zero-flux rule.
+
+        At Fe=0 the flux derivatives are singular.  Separate masks preserve
+        the established one-sided conductance excursion without evaluating a
+        singular branch, which a direct ``np.where`` expression would do.
+        """
+        dP = np.full(Fe.shape, np.nan, dtype=np.float64)
+        dH = np.full(Fe.shape, np.nan, dtype=np.float64)
+
+        zero_flux = Fe == 0
+        dP[zero_flux] = ped(E0[zero_flux], dFe[zero_flux])
+        dH[zero_flux] = hall(E0[zero_flux], dFe[zero_flux])
+
+        nonzero_flux = ~zero_flux
+        x1 = E0[nonzero_flux]
+        x2 = Fe[nonzero_flux]
+        dx1 = dE0[nonzero_flux]
+        dx2 = dFe[nonzero_flux]
+        covariance = varE0Fe[nonzero_flux]
+
+        denom = 16 + x1**2
+        dsp_dx1 = (40/denom - 80*(x1/denom)**2) * np.sqrt(x2)
+        dsp_dx2 = 40*x1/denom/2/np.sqrt(x2)
+        dP[nonzero_flux] = np.sqrt(
+            dsp_dx1**2 * dx1**2
+            + dsp_dx2**2 * dx2**2
+            + 2 * dsp_dx1 * dsp_dx2 * covariance
+        )
+
+        dsh_dx1 = (
+            18 * x1**0.85 / denom
+            * (1.85 - 2*x1**2/denom) * np.sqrt(x2)
+        )
+        dsh_dx2 = 9*x1**1.85/denom/np.sqrt(x2)
+        dH[nonzero_flux] = np.sqrt(
+            dsh_dx1**2 * dx1**2
+            + dsh_dx2**2 * dx2**2
+            + 2 * dsh_dx1 * dsh_dx2 * covariance
+        )
+        return dP, dH
 
     def _compute_pixel(self, i: int, j: int, k: int):
         """
@@ -304,6 +467,7 @@ class ConductanceImage:
                 self.dEp,
                 E0=E0_input,
                 dE0=dE0_input,
+                proton_response_values=self._proton_response,
             )
 
             self.E0[i, j, k], self.dE0[i, j, k] = E0, dE0
@@ -322,8 +486,6 @@ class ConductanceImage:
             
             self.P[i, j, k], self.H[i, j, k] = P, H
             self.dP[i, j, k], self.dH[i, j, k] = dP, dH
-
-        self.w = (self.wic_w + self.s12_w + self.s13_w)/3
 
     def to_nc(self, filename: str):
         """
