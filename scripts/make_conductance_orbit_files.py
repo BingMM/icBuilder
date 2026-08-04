@@ -137,7 +137,7 @@ def process_orbit(
     frame_kp = match_gfz_kp(t, kp_series)
 
         # Bin and conductance images
-    losc = True
+    losc = False
     wic_bI = BinnedImage(wic_pI, grid_w, inflate_uncertainty=True, correction='SH', los_correction=losc)
     s12_bI = BinnedImage(s12_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG', los_correction=losc)
     s13_bI = BinnedImage(s13_pI, grid_s, inflate_uncertainty=True, target_grid=grid_w, correction='DG', los_correction=losc)
@@ -149,7 +149,7 @@ def process_orbit(
         kp=frame_kp["kp"],
         kp_interval_start=frame_kp["interval_start"],
         kp_provenance=kp_series["provenance"],
-        energy_method="image_ratio",
+        energy_method="zhang_paxton",
     )
         # Save to netCDF
     out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
