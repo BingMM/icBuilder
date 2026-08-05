@@ -1,6 +1,7 @@
 #%% Import 
 
 from os.path import join as pjoin
+import os
 from pathlib import Path
 import numpy as np
 import glob
@@ -17,6 +18,104 @@ import argparse
 from apexpy.helpers import subsol
 
 #%% Fun
+
+ORBIT_IMAGE_VARIABLES = [
+    "wic_avg", "s12_avg", "s13_avg", "wic_std", "s12_std", "s13_std",
+    "E0", "dE0", "Fe", "dFe", "varE0Fe", "R", "dR",
+    "P", "H", "dP", "dH", "w",
+    "wic_sza", "wic_dza", "wic_los_factor",
+    "s12_sza", "s12_dza", "s12_los_factor",
+    "s13_sza", "s13_dza", "s13_los_factor",
+]
+
+
+def orbit_file_is_complete(path):
+    """Return True when *path* looks like a complete current orbit product.
+
+    This is a structural check. It is deliberately quick enough to run over
+    all orbit files before a restart without reading every compressed array.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return False
+
+    try:
+        with Dataset(path) as nc:
+            shape = (
+                len(nc.dimensions["time"]),
+                len(nc.dimensions["dim1"]),
+                len(nc.dimensions["dim2"]),
+            )
+            if shape[0] == 0 or shape[1:] != (36, 36):
+                return False
+
+            if nc.electron_energy_method != "zhang_paxton":
+                return False
+
+            for name in ORBIT_IMAGE_VARIABLES:
+                if nc.variables[name].shape != shape:
+                    return False
+
+            for name in ["time", "Kp", "Kp_lookup", "Kp_interval_start", "ssalon"]:
+                if nc.variables[name].shape != (shape[0],):
+                    return False
+
+            grid = nc.groups["grid"]
+            for name in ["position", "orientation", "L", "W", "Lres", "Wres", "R"]:
+                grid.getncattr(name)
+
+    except (OSError, RuntimeError, KeyError, AttributeError):
+        return False
+
+    return True
+
+
+def select_orbits_to_process(orbits, output_dir, overwrite=False):
+    """Return sorted missing or invalid orbits, or all orbits if requested."""
+    orbits = sorted(int(orbit) for orbit in orbits)
+    if overwrite:
+        print(f"Recomputing all {len(orbits)} common orbits (--overwrite).\n")
+        return orbits
+
+    complete = []
+    invalid = []
+    missing = []
+    for orbit in orbits:
+        path = Path(output_dir) / f"or_{orbit:04d}.nc"
+        if not path.exists():
+            missing.append(orbit)
+        elif orbit_file_is_complete(path):
+            complete.append(orbit)
+        else:
+            invalid.append(orbit)
+
+    print(f"Complete orbit files: {len(complete)}")
+    print(f"Missing orbit files: {len(missing)}")
+    print(f"Invalid orbit files to replace: {len(invalid)}\n")
+    return sorted(missing + invalid)
+
+
+def save_orbit_file(conductance, final_path):
+    """Write and validate one orbit before atomically exposing its final name.
+
+    A worker writes beside the final file so ``os.replace`` stays on one file
+    system. Do not run two copies of this pipeline against the same output
+    directory because they would share the same ``.partial`` filenames.
+    """
+    final_path = Path(final_path)
+    partial_path = Path(str(final_path) + ".partial")
+
+    try:
+        conductance.to_nc(partial_path)
+        if not orbit_file_is_complete(partial_path):
+            raise RuntimeError(f"incomplete orbit file written to {partial_path}")
+        os.replace(partial_path, final_path)
+    finally:
+        # An ordinary Python exception should not leave a misleading partial
+        # file. A hard crash can leave one, but the next run overwrites it.
+        if partial_path.exists():
+            partial_path.unlink()
+
 
 def find_common_times_with_indices(list1, list2, list3, tolerance=timedelta(seconds=2)):
     # Sort the lists and keep track of the original indices
@@ -151,9 +250,10 @@ def process_orbit(
         kp_provenance=kp_series["provenance"],
         energy_method="zhang_paxton",
     )
-        # Save to netCDF
-    out_path = pjoin(p_out, f'or_{orbit:04d}.nc')
-    cI.to_nc(out_path)
+    # The final filename appears only after the NetCDF has closed and passed a
+    # structural check. This makes the file itself the restart record.
+    out_path = Path(p_out) / f'or_{orbit:04d}.nc'
+    save_orbit_file(cI, out_path)
     return orbit  # Success
     #except Exception as e:
     #    print(f"Failed orbit {orbit}: {e}")
@@ -257,6 +357,8 @@ def parse_args(argv=None):
                         help='SI13 folder name under --base (default s13)')
     parser.add_argument('--output-folder', default='conductance',
                         help='Output folder name under --base (default conductance)')
+    parser.add_argument('--overwrite', action='store_true',
+                        help='Recompute complete orbit files instead of resuming')
     return parser.parse_args(argv)
 
 
@@ -279,8 +381,18 @@ def main(argv=None):
         paths['s13'], paths['base'] / 's13_avail_orbit.npy', 'S13')
 
     # Create list of all overlapping orbits.
-    orbits = set(o_wic) & set(o_s12) & set(o_s13)
+    orbits = sorted(set(o_wic) & set(o_s12) & set(o_s13))
     print(f'There are {len(orbits)} common orbits between WIC, S12, and SI13\n')
+
+    paths['output'].mkdir(parents=True, exist_ok=True)
+    orbits = select_orbits_to_process(
+        orbits,
+        paths['output'],
+        overwrite=args.overwrite,
+    )
+    if not orbits:
+        print('All common orbits already have complete output files.')
+        return []
 
     grid_w, grid_s = make_image_grids()
     print('Fine grid resolution is: ' + str(grid_w.Lres/1e3) + ' km')
@@ -290,7 +402,6 @@ def main(argv=None):
     # Load the fixed local Kp source once. Orbit workers never contact GFZ.
     kp_series = load_gfz_kp()
 
-    paths['output'].mkdir(parents=True, exist_ok=True)
     return run_all_orbits(
         orbits,
         paths['wic'],

@@ -1,20 +1,21 @@
-"""Tests for the fixed definitive GFZ Kp series and frame matching."""
+"""Tests for the bundled definitive GFZ Kp series and frame matching."""
 
+import hashlib
 from datetime import datetime, timezone
 
 import numpy as np
 import pytest
 
-from icbuilder.kp import DEFAULT_KP_PATH, GFZ_KP_SHA256
+from icbuilder.kp import DEFAULT_KP_PATH
 from icbuilder.kp import load_gfz_kp, match_gfz_kp
 
 
 def test_bundled_kp_data_are_complete_and_definitive():
     series = load_gfz_kp()
 
-    assert len(series["time"]) == 5848
+    assert len(series["time"]) == 10464
     assert series["time"][0] == np.datetime64("2000-01-01T00:00:00")
-    assert series["time"][-1] == np.datetime64("2001-12-31T21:00:00")
+    assert series["time"][-1] == np.datetime64("2003-07-31T21:00:00")
     assert np.all(np.diff(series["time"]) == np.timedelta64(3, "h"))
     assert np.all(series["status"] == "def")
     assert np.all((series["kp"] >= 0) & (series["kp"] <= 9))
@@ -26,15 +27,17 @@ def test_bundled_kp_data_are_complete_and_definitive():
     )
     assert series["provenance"]["doi"] == "10.5880/Kp.0001"
     assert series["provenance"]["licence"] == "CC BY 4.0"
-    assert series["provenance"]["sha256"] == GFZ_KP_SHA256
+    expected_sha = hashlib.sha256(DEFAULT_KP_PATH.read_bytes()).hexdigest()
+    assert series["provenance"]["sha256"] == expected_sha
 
 
-def test_modified_bundled_response_fails_checksum_validation(tmp_path):
+def test_checksum_records_the_file_that_was_loaded(tmp_path):
     modified = tmp_path / "modified_kp.json"
     modified.write_bytes(DEFAULT_KP_PATH.read_bytes() + b"\n")
 
-    with pytest.raises(ValueError, match="checksum"):
-        load_gfz_kp(modified)
+    series = load_gfz_kp(modified)
+    expected_sha = hashlib.sha256(modified.read_bytes()).hexdigest()
+    assert series["provenance"]["sha256"] == expected_sha
 
 
 def _small_series():

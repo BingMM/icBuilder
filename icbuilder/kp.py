@@ -8,18 +8,15 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_KP_PATH = Path(__file__).parent / "data" / "gfz_kp_2000_2001.json"
+DEFAULT_KP_PATH = Path(__file__).parent / "data" / "gfz_kp_2000_2003.json"
 GFZ_KP_QUERY = (
     "https://kp.gfz.de/app/json/"
     "?start=2000-01-01T00:00:00Z"
-    "&end=2001-12-31T23:59:59Z"
+    "&end=2003-07-31T23:59:59Z"
     "&index=Kp&status=def"
 )
 GFZ_KP_DOI = "10.5880/Kp.0001"
-GFZ_KP_ACQUIRED = "2026-07-30"
-GFZ_KP_SHA256 = (
-    "259cc539ac6578510ea9f54691bbe2f15913a19060db3e390f4490c49226f91e"
-)
+GFZ_KP_ACQUIRED = "2026-08-05"
 
 
 def _utc_datetime64(values):
@@ -43,7 +40,7 @@ def _utc_datetime64(values):
     return np.asarray(converted, dtype="datetime64[s]")
 
 
-def validate_gfz_kp(times, kp, status, require_complete_interval=False):
+def validate_gfz_kp(times, kp, status):
     """Check Kp arrays before they enter the IMAGE processing pipeline."""
 
     times = np.asarray(times, dtype="datetime64[s]")
@@ -69,37 +66,18 @@ def validate_gfz_kp(times, kp, status, require_complete_interval=False):
     if not np.allclose(kp * 3, np.round(kp * 3), atol=0.0011, rtol=0):
         raise ValueError("Kp values must lie on the traditional one-third scale")
 
-    if require_complete_interval:
-        if len(times) != 5848:
-            raise ValueError("the complete 2000-2001 series must have 5,848 values")
-        if times[0] != np.datetime64("2000-01-01T00:00:00"):
-            raise ValueError("the Kp series must start at 2000-01-01 00:00 UTC")
-        if times[-1] != np.datetime64("2001-12-31T21:00:00"):
-            raise ValueError("the Kp series must end at 2001-12-31 21:00 UTC")
-
-
-def validate_gfz_kp_checksum(content):
-    """Confirm that the local file is the documented GFZ API response."""
-
-    checksum = hashlib.sha256(content).hexdigest()
-    if checksum != GFZ_KP_SHA256:
-        raise ValueError(
-            "GFZ Kp file checksum does not match the documented source response"
-        )
-
 
 def load_gfz_kp(path=DEFAULT_KP_PATH):
-    """Load the fixed, definitive GFZ Kp series used by the IMAGE pipeline."""
+    """Load the local definitive GFZ Kp series used by the IMAGE pipeline."""
 
     path = Path(path)
     content = path.read_bytes()
-    validate_gfz_kp_checksum(content)
     source = json.loads(content)
 
     times = _utc_datetime64(source["datetime"])
     kp = np.asarray(source["Kp"], dtype=float)
     status = np.asarray(source["status"])
-    validate_gfz_kp(times, kp, status, require_complete_interval=True)
+    validate_gfz_kp(times, kp, status)
 
     meta = source.get("meta", {})
     if meta.get("source") != "GFZ Potsdam":
@@ -118,7 +96,8 @@ def load_gfz_kp(path=DEFAULT_KP_PATH):
             "licence": meta["license"],
             "query": GFZ_KP_QUERY,
             "acquired": GFZ_KP_ACQUIRED,
-            "sha256": GFZ_KP_SHA256,
+            # Record the exact local input without rejecting a valid updated file.
+            "sha256": hashlib.sha256(content).hexdigest(),
             "image_time_interpretation": (
                 "Naive IMAGE frame datetimes are interpreted as UTC."
             ),

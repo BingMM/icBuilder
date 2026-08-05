@@ -126,17 +126,25 @@ python scripts/make_conductance_orbit_files.py --base ~/IMAGE_FUV \
     --output-folder =conductance --parallel False
 ```
 
-The bundled `icbuilder/data/gfz_kp_2000_2001.json` is the unchanged response
-from the official GFZ JSON API for 2000--2001. It is definitive (`status=def`)
-Kp distributed under CC BY 4.0 with DOI `10.5880/Kp.0001`. See
-`icbuilder/data/README.md` for the exact query and acquisition record.
-The loader verifies the recorded SHA-256 before parsing the file.
+The bundled `icbuilder/data/gfz_kp_2000_2003.json` contains definitive
+(`status=def`) Kp from 2000-01-01 through 2003-07-31, distributed under CC BY
+4.0 with DOI `10.5880/Kp.0001`. See `icbuilder/data/README.md` for the exact
+query and acquisition record. The loader checks the series and records the
+SHA-256 of the file actually used in each output product.
 
 The pipeline interprets the orbit files' timezone-free frame datetimes as UTC.
 GFZ timestamps mark interval starts, so a frame at exactly 03:00 uses the
 03:00--06:00 Kp value. Time interpolation, nearest matching, gap filling, and
 out-of-range clipping are not used. `ConductanceImage` checks again that every
 frame is inside the Kp interval serialized with it.
+
+Orbit processing resumes by default. Existing `or_XXXX.nc` files are skipped
+only when they open successfully and contain the expected Zhang--Paxton
+variables and dimensions. New products are written to a temporary file in the
+output directory and moved to their final name only after validation, so a
+crash cannot make an incomplete file look finished. Use `--overwrite` to
+deliberately recompute all common orbits. Do not run two pipeline instances
+against the same output directory at the same time.
 
 If proton subtraction clips electron energy flux to zero, the derivative of
 the Robinson conductance with respect to flux is singular. In that case dP

@@ -1,8 +1,8 @@
 # Current State
 
-Last reviewed: 2026-08-04
-Repository snapshot: `main` at `6cba18d`
-Upstream state: uncommitted verified `ConductanceImage` serial optimizations
+Last reviewed: 2026-08-05
+Repository snapshot: `main` at `ff957b5`
+Upstream state: uncommitted verified Kp-range and orbit-restart changes
 
 ## Current position
 
@@ -12,6 +12,11 @@ the WIC/SI13-derived E0 and dE0 with the fixed-grid lookup. The stage keeps the
 existing three-camera common-frame population and SI13 ratio diagnostics so
 old and new products can be compared without simultaneously changing frame
 support.
+
+The first full Halley run exposed that the bundled Kp series stopped at the
+end of 2001 although the IMAGE inputs continue through June 2003. The local
+series now extends through July 2003. Orbit processing also resumes by default
+from structurally valid output files and publishes new files atomically.
 
 The current implementation and generated figures are uncommitted. A full
 read-only audit examined the live pipeline and five tracked example
@@ -83,7 +88,7 @@ causal boundary. See [[Audit - 2026-07-29]].
 - MLT is correctly retained as a two-dimensional grid coordinate:
   `(grid.lon / 15) % 24`. A native `(xi, eta)` diagnostic shows the MLT,
   E0, and dE0 fields together.
-- All 39 focused tests pass. They cover the collapse, lookup and grid,
+- All 45 focused tests pass. They cover the collapse, lookup and grid,
   definitive-Kp integrity and boundary matching, paired E0 override, SI13
   invariance, induced covariance, zero-flux Robinson propagation, geometry,
   and NetCDF provenance. Selected Kp=1.52 lookup cells agree with direct
@@ -99,16 +104,22 @@ causal boundary. See [[Audit - 2026-07-29]].
   cells touch the 50-degree equatorward sampling limit. The table therefore
   works technically but does not settle the production latitude-domain
   decision.
-- The bundled unchanged GFZ JSON response contains all 5,848 definitive
-  three-hour Kp intervals from 2000-01-01 00:00 through 2001-12-31 21:00 UTC.
-  It records source, status, DOI `10.5880/Kp.0001`, CC BY 4.0 licence, exact
-  query, acquisition date, and checksum. Orbit processing uses only this local
-  copy. The loader verifies the recorded SHA-256 before parsing it.
+- The bundled GFZ JSON response contains 10,464 definitive three-hour Kp
+  intervals from 2000-01-01 00:00 through 2003-07-31 21:00 UTC. It records
+  source, DOI `10.5880/Kp.0001`, CC BY 4.0 licence, query, acquisition date,
+  and the SHA-256 of the file actually loaded. Orbit processing uses only this
+  local copy. Structural validation replaces the former hard-coded checksum
+  gate and record-count/date checks.
 - IMAGE frame times are matched to half-open Kp intervals
   `[start, start + 3 h)`. Exact three-hour and midnight boundaries select the
   new interval. Gaps and out-of-range frames fail instead of being
   interpolated, filled, or clipped. The timezone-free IMAGE times are
   explicitly interpreted as UTC.
+- Orbit processing treats a structurally valid `or_XXXX.nc` as its completion
+  record. By default it skips valid products and reruns missing or invalid
+  ones; `--overwrite` requests a full recomputation. Each worker writes and
+  validates `or_XXXX.nc.partial` before an atomic same-directory rename, so a
+  crash cannot expose a partial product under the final name.
 - `ConductanceImage` loads all requested lookup layers once per orbit,
   validates the `(time, 36, 36)` shape and grid, and preserves both original
   thirds-valued GFZ Kp and nearest-hundredth lookup Kp. It also verifies that

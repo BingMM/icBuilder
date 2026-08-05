@@ -1,6 +1,6 @@
 # Processing Pipeline
 
-Last reviewed: 2026-08-04
+Last reviewed: 2026-08-05
 
 This note records the durable high-level workflow visible in the README and
 live code. It is orientation, not a claim that the full production dataset was
@@ -67,6 +67,13 @@ reproduced during the review.
    Each stage-1 product also stores original GFZ Kp, rounded lookup Kp, Kp
    interval start, GFZ provenance, Zhang--Paxton lookup/collapse provenance,
    dE0 interpretation, and the induced E0--Fe covariance.
+
+   Existing structurally valid orbit products are skipped by default. A new
+   orbit is written to `or_XXXX.nc.partial`, reopened for a lightweight schema
+   check, and atomically renamed to `or_XXXX.nc`. Missing or invalid products
+   are rerun; `--overwrite` deliberately recomputes all common orbits. The
+   output file itself is the completion record, so there is no separate ledger
+   that can disagree with the data.
 
    The combined sensor weight and the six camera proton-response quantities
    that depend only on orbit-wide Ep/dEp are evaluated once. The production
@@ -181,12 +188,14 @@ direct-collapse checks at Kp 0.00, 1.52, and 9.00 agree to float32 precision.
 
 ### Stage-1 E0 integration
 
-`icbuilder/data/gfz_kp_2000_2001.json` is the unchanged official GFZ JSON
-response for the documented IMAGE interval. It contains 5,848 definitive
-three-hour values and is distributed under CC BY 4.0 with DOI
-`10.5880/Kp.0001`. The exact query, acquisition date, and checksum are recorded
-in `icbuilder/data/README.md`. The loader verifies that checksum before
-parsing; production processing never contacts GFZ.
+`icbuilder/data/gfz_kp_2000_2003.json` is the official GFZ JSON response from
+2000-01-01 through 2003-07-31, one month beyond the last June 2003 IMAGE
+orbit. It contains 10,464 definitive three-hour values and is distributed
+under CC BY 4.0 with DOI `10.5880/Kp.0001`. The query, acquisition date, and
+downloaded-file checksum are recorded in `icbuilder/data/README.md`.
+Production processing never contacts GFZ. The loader checks cadence, status,
+and physical Kp values, then calculates the checksum of the file actually
+used for product provenance.
 
 For each orbit, `ConductanceImage` requests the lookup once with the complete
 Kp vector. It validates the resulting `(time, 36, 36)` arrays and grid,

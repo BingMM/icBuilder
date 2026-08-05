@@ -14,18 +14,19 @@ the provisional latitude-collapse settings are stored as file attributes.
 
 ## Definitive GFZ Kp
 
-`gfz_kp_2000_2001.json` is the unchanged response from the official GFZ JSON
-API for the documented IMAGE interval. It contains 5,848 uninterrupted
+`gfz_kp_2000_2003.json` is the response from the official GFZ JSON API for
+the IMAGE interval plus a one-month buffer after the last June 2003 orbit.
+It contains 10,464 uninterrupted
 three-hour values, all with definitive (`def`) status.
 
-- Acquired: 2026-07-30
+- Acquired: 2026-08-05
 - Source: GFZ Potsdam
 - DOI: `10.5880/Kp.0001`
 - Licence: CC BY 4.0
 - SHA-256:
-  `259cc539ac6578510ea9f54691bbe2f15913a19060db3e390f4490c49226f91e`
+  `29218cf7ab50d7629c92f3fbd2709554dabe593e34f31d82b64bc75b29b2d362`
 - Query:
-  `https://kp.gfz.de/app/json/?start=2000-01-01T00:00:00Z&end=2001-12-31T23:59:59Z&index=Kp&status=def`
+  `https://kp.gfz.de/app/json/?start=2000-01-01T00:00:00Z&end=2003-07-31T23:59:59Z&index=Kp&status=def`
 
 Re-download and validate the source response with:
 
@@ -34,5 +35,8 @@ python scripts/download_gfz_kp.py
 ```
 
 Orbit processing reads this local file and never contacts GFZ.
-The loader checks the SHA-256 before parsing the response, and the download
-script refuses to replace it with bytes that do not match this acquisition.
+The downloader and loader check the data shape, uninterrupted three-hour
+cadence, definitive status, and physical Kp range. The loader calculates the
+SHA-256 of the file it actually reads and includes it in output provenance.
+This records the exact input without preventing a deliberate date-range
+extension.

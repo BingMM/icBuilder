@@ -1,9 +1,8 @@
 # Handoff - Latest
 
-Last updated: 2026-08-04
-Repository snapshot: `main` at `6cba18d`
-Worktree state: uncommitted verified `ConductanceImage` serial optimizations,
-focused regression tests, and documentation
+Last updated: 2026-08-05
+Repository snapshot: `main` at `ff957b5`
+Worktree state: uncommitted verified Kp-range, restart, tests, and documentation
 
 ## Project state
 
@@ -36,8 +35,15 @@ multiprocessing and matches each final retained frame to the enclosing
 half-open three-hour interval. `ConductanceImage` requests all lookup layers
 once per orbit, checks their shape and grid, verifies that every frame remains
 inside its serialized interval, and supplies E0/dE0 to the count conversion.
-Missing, gapped, or out-of-range Kp fails explicitly. The local GFZ response
-must also match its documented SHA-256 before it is parsed.
+Missing, gapped, or out-of-range Kp fails explicitly. The local GFZ series now
+contains 10,464 definitive values through 2003-07-31, one month beyond the
+last June 2003 IMAGE orbit. Its actual SHA-256 is recorded in provenance
+without a hard-coded checksum gate.
+
+The orbit pipeline now resumes by default. It skips structurally valid current
+products, reruns missing or invalid outputs, and provides `--overwrite` for a
+deliberate full rebuild. Workers write and validate `or_XXXX.nc.partial` before
+atomically publishing `or_XXXX.nc`; the final file is the completion record.
 
 The paired E0/dE0 override bypasses the WIC/SI13 energy inversion while keeping
 SI12 proton correction, WIC-derived Fe/dFe, and R/dR diagnostics. The induced
@@ -132,7 +138,7 @@ Q-threshold boundary from producing the visible jitter present at
 - Fresh direct collapses checked nine cells spanning Kp 0.00, 1.52, and 9.00.
   The maximum difference across E0, dE0, and median E0 was `2.4e-7 keV`, as
   expected from float32 table storage.
-- All 39 focused tests pass. They cover canonical grid shape/nesting,
+- All 45 focused tests pass. They cover canonical grid shape/nesting,
   two-dimensional MLT, nearest-hundredth Kp quantization, lookup shape,
   scalar/vector access, direct-collapse agreement, definitive-Kp integrity and
   boundary matching and checksum, paired E0 override, SI13 invariance, induced
@@ -313,10 +319,10 @@ Preserve these issues while testing the implemented stage-1 path:
 
 ## Next action
 
-Run one representative orbit to a scratch output and compare the new E0, dE0,
-Fe, covariance, and conductance fields with the old product without changing
-frame support. Inspect high/low Kp and MLT behavior and confirm that finite
-SI13 changes cannot alter E0 or Fe.
+Push or copy the current changes to Halley and rerun the existing four-worker
+command without `--overwrite`. The startup scan should accept completed
+products and schedule only missing or structurally invalid orbits. Record its
+three counts and confirm that the formerly failing 2002 frame completes.
 
 Before treating the result as publication-ready, resolve whether
 Zhang--Paxton electron mean energy is compatible with the energy quantity
@@ -331,15 +337,11 @@ defensible. Do not combine that support change with the initial E0 comparison.
 ## Portfolio impact
 
 - Central update needed: No
-- Changes: The central card already reflects the audit and changed next
-  action. The verified grid fix and clarified upstream calibration/LOS
-  boundary refine the technical investigation without changing portfolio
-  status, priority, deadline, or publication significance.
-- Sync summary: the SI grid now nests exactly. The source product uses
-  FUVIEW3 corrected counts, while the 2018 paper's zenith-angle treatment is
-  dayglow modeling rather than nadir-equivalent auroral correction. The paper
-  avoids absolute intensity comparison, so icBuilder still needs a validated
-  quantitative LOS treatment for WIC-derived Fe.
+- Changes: None to portfolio status, priority, deadline, or research
+  significance.
+- Sync summary: definitive Kp now covers the complete IMAGE interval plus a
+  July 2003 buffer. Full-corpus processing can resume from validated orbit
+  files rather than repeating completed work.
 
 ## Entry points
 
@@ -355,7 +357,7 @@ defensible. Do not combine that support change with the initial E0 comparison.
 - `scripts/make_zhang_paxton_lookup.py`
 - `scripts/plot_zhang_paxton_lookup.py`
 - `icbuilder/data/zhang_paxton_e0_lookup.nc`
-- `icbuilder/data/gfz_kp_2000_2001.json`
+- `icbuilder/data/gfz_kp_2000_2003.json`
 - `icbuilder/data/README.md`
 - `tests/test_kp.py`
 - `tests/test_e0_override.py`

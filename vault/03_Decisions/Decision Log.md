@@ -1,6 +1,31 @@
 # Decision Log
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-08-05
+
+## 2026-08-05 — Use orbit products as restart records
+
+**Decision:** Resume conductance processing from structurally valid orbit
+NetCDF files. Write each new product to a same-directory partial file,
+validate it after closing, and atomically rename it to the final name. Do not
+maintain a separate completed-orbit ledger.
+
+**Rationale:** The product is the authoritative evidence that an orbit
+finished. A concurrent ledger needs locking and can disagree with the file if
+a process stops between the two writes. Atomic publication leaves a final
+name only after a valid save, while missing or invalid outputs naturally enter
+the next run. `--overwrite` remains available for deliberate recomputation.
+
+## 2026-08-05 — Keep Kp validation scientific and replaceable
+
+**Decision:** Bundle definitive GFZ Kp through 2003-07-31, validate its
+cadence, status, dimensions, and physical range, and calculate the loaded
+file's checksum for provenance. Do not reject a valid replacement because it
+does not match a checksum or record count hard-coded in the source.
+
+**Rationale:** The original 2000--2001 bundle caused the full IMAGE run to
+fail on its first 2002 frame. Git versions the downloaded JSON, while a
+dynamically recorded checksum preserves exact product provenance without
+turning an intentional time-range extension into coordinated code changes.
 
 ## 2026-07-31 — Keep the collapse calculation separate from diagnostics
 
