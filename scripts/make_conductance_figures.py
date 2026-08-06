@@ -84,7 +84,12 @@ def plot(cI, i, c_scales, lat, lt):
         ax.set_title(tit_, fontsize=18)
         ax.text(.85, .85, str(int(cs_[-1])), ha='left', va='center', fontsize=16, transform=ax.transAxes)
     
-    axs[0,2].text(1.1, 1.2, cI.time[i], ha='center', va='center', fontsize=20, transform=axs[0,2].transAxes)
+    if hasattr(cI, 'Kp'):        
+        stit = 'Kp: ' + str(cI.Kp[i]) + ' - ' + str(cI.time[i])
+    else:
+        stit = cI.time[i]
+    axs[0,2].text(1.1, 1.2, stit, ha='center', va='center', fontsize=20, transform=axs[0,2].transAxes)
+    #axs[0,2].text(1.1, 1.2, cI.time[i], ha='center', va='center', fontsize=20, transform=axs[0,2].transAxes)
     
 #%% Plot
 
