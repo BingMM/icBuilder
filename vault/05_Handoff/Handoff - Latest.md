@@ -1,8 +1,8 @@
 # Handoff - Latest
 
-Last updated: 2026-08-05
-Repository snapshot: `main` at `ff957b5`
-Worktree state: uncommitted verified Kp-range, restart, tests, and documentation
+Last updated: 2026-08-10
+Repository snapshot: `main` at `2e8bdf5`
+Worktree state: implementation clean before this modular-redesign documentation checkpoint
 
 ## Project state
 
@@ -319,10 +319,19 @@ Preserve these issues while testing the implemented stage-1 path:
 
 ## Next action
 
-Push or copy the current changes to Halley and rerun the existing four-worker
-command without `--overwrite`. The startup scan should accept completed
-products and schedule only missing or structurally invalid orbits. Record its
-three counts and confirm that the formerly failing 2002 frame completes.
+The first full rerun produced 1,504 common-orbit files. Missing WIC source
+files that explain at least part of the discrepancy with the 1,685 historical
+products have now been located and transferred. Rerun the same command against
+the same output directory without `--overwrite`; the startup scan should skip
+complete products and schedule newly common, missing, or invalid orbits.
+
+Before adding more tightly coupled changes, decide whether to adopt the
+three-stage architecture in
+`vault/02_Algorithm/Proposed Modular Pipeline Redesign.md`: reusable binned
+FUV observations, method-specific E0/Fe precipitation products, and
+replaceable conductance forward-model products. The proposal also makes the
+core numerical functions directly callable from icAnalyzer. It is recorded as
+a design under discussion, not as authorization to rewrite the pipeline.
 
 Before treating the result as publication-ready, resolve whether
 Zhang--Paxton electron mean energy is compatible with the energy quantity
@@ -336,12 +345,13 @@ defensible. Do not combine that support change with the initial E0 comparison.
 
 ## Portfolio impact
 
-- Central update needed: No
-- Changes: None to portfolio status, priority, deadline, or research
-  significance.
-- Sync summary: definitive Kp now covers the complete IMAGE interval plus a
-  July 2003 buffer. Full-corpus processing can resume from validated orbit
-  files rather than repeating completed work.
+- Central update needed: Yes
+- Changes: The next project decision is whether to stop patching the combined
+  pipeline and adopt a staged, reusable architecture before further VAE work.
+- Sync summary: the 1,504-orbit rerun exposed missing WIC inputs, which have
+  now been located and transferred. The user is considering a modular rebuild
+  that preserves existing scientific calculations while separating binned
+  observations, precipitation inference, and conductance forward models.
 
 ## Entry points
 
@@ -372,4 +382,5 @@ defensible. Do not combine that support change with the initial E0 comparison.
 - `figures/zhang_paxton_collapse_dE0_result.png`
 - `figures/zhang_paxton_lookup_kp1_52.png`
 - `vault/02_Algorithm/Processing Pipeline.md`
+- `vault/02_Algorithm/Proposed Modular Pipeline Redesign.md`
 - `vault/02_Algorithm/Audit - 2026-07-29.md`

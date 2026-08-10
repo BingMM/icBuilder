@@ -1,10 +1,25 @@
 # Current State
 
-Last reviewed: 2026-08-05
-Repository snapshot: `main` at `ff957b5`
-Upstream state: uncommitted verified Kp-range and orbit-restart changes
+Last reviewed: 2026-08-10
+Repository snapshot: `main` at `2e8bdf5`
+Upstream state: Kp-range, restart, and performance changes are committed;
+modular-redesign documentation is uncommitted
 
 ## Current position
+
+The full rerun initially produced 1,504 common-orbit conductance products,
+fewer than the 1,685 historical products. The missing WIC source files have
+since been located and transferred to the server. The current restart logic
+can rescan the enlarged input set and process only missing or structurally
+invalid outputs; completion of that resumed run has not yet been confirmed.
+
+The user is now considering an architectural reset instead of continuing to
+patch the combined pipeline. The proposed direction separates reusable binned
+FUV observations, method-specific precipitation inference, and replaceable
+conductance forward models. Shared numerical functions would also be callable
+from icAnalyzer for VAE ensemble propagation. This is a proposed design, not
+an implementation decision. See
+[[Proposed Modular Pipeline Redesign]].
 
 The first-stage Zhang–Paxton (2008) integration is implemented. The orbit
 pipeline now assigns definitive GFZ Kp to each final IMAGE frame and replaces
