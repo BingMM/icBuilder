@@ -6,8 +6,9 @@ from numpy.typing import NDArray
 from secsy import CSgrid
 from copy import deepcopy as dcopy
 from scipy.stats import t, chi2
-from scipy.interpolate import griddata
 from .preimage import PreImage
+from netCDF4 import Dataset, date2num
+from datetime import datetime
 
 #%% BinnedImage class
 
@@ -16,13 +17,13 @@ class BinnedImage:
     A class to bin IMAGE data onto a CSgrid.
 
     This class processes a `PreImage` object and computes binned statistics
-    (median and standard deviation) for each grid cell, optionally inflating the
-    uncertainties or interpolating to a different grid.
+    (median and standard deviation) for each native sensor-grid cell, with an
+    option to inflate the uncertainties for small sample counts.
 
     Attributes
     ----------
     grid : CSgrid
-        The CSgrid to which data is binned (or interpolated).
+        The native sensor CSgrid to which data is binned.
     counts : np.ndarray
         Number of samples contributing to each grid cell.
     mu : np.ndarray
@@ -46,7 +47,7 @@ class BinnedImage:
     def __init__(self,
                  pI: PreImage,
                  grid: CSgrid,
-                 target_grid: Optional[CSgrid] = None,
+                 time: Union[NDArray[datetime], list[datetime]],
                  inflate_uncertainty: bool = False,
                  correction: Optional[str] = None,
                  los_correction: bool = True
@@ -60,8 +61,8 @@ class BinnedImage:
             Input IMAGE data to bin.
         grid : CSgrid
             Cubbed sphere grid to bin onto.
-        target_grid : CSgrid, optional
-            If provided, interpolate results onto this cubbed sphere grid.
+        time : np.ndarray or list of datetime
+            UTC timestamp for each frame in ``pI``.
         inflate_uncertainty : bool
             If True, inflates uncertainties using t and chi² statistics.
             Should be used when less than 30 counts per bin.
@@ -72,21 +73,29 @@ class BinnedImage:
             If True, multiply each source pixel by ``cos(DZA)`` before
             calculating the binned image statistics.
         """
+        self.sensor = pI.sensor
+        self.time = np.asarray(time, dtype=object)
+        if self.time.ndim != 1 or self.time.size != pI.shape[0]:
+            raise ValueError("time must contain one timestamp per image frame")
+        if correction not in (None, "SH", "DG"):
+            raise ValueError("correction must be None, 'SH', or 'DG'")
+
         self.grid = dcopy(grid)
         self.correction = correction
         self.los_correction = bool(los_correction)
 
         time_len, ny, nx = pI.shape[0], grid.shape[0], grid.shape[1]
-        self.counts = np.zeros((time_len, ny, nx))
-        self.mu = np.full_like(self.counts, np.nan)
-        self.sigma = np.full_like(self.counts, np.nan)
-        self.w = np.full_like(self.counts, np.nan)
-        self.sza = np.full_like(self.counts, np.nan)
-        self.dza = np.full_like(self.counts, np.nan)
-        self.los_factor = np.full_like(self.counts, np.nan)
+        shape = (time_len, ny, nx)
+        self.counts = np.zeros(shape, dtype=np.int32)
+        self.mu = np.full(shape, np.nan)
+        self.sigma = np.full(shape, np.nan)
+        self.w = np.full(shape, np.nan)
+        self.sza = np.full(shape, np.nan)
+        self.dza = np.full(shape, np.nan)
+        self.los_factor = np.full(shape, np.nan)
         self.shape = self.counts.shape
         self.ssalon = pI.ssalon
-        
+
         for i in range(time_len):
             #lat, lon = pI.get_mcoords(i) # Get magnetic coordinates
             lat, _, mlt, _ = pI.get_mcoords(i) # Get magnetic coordinates
@@ -182,10 +191,6 @@ class BinnedImage:
         if inflate_uncertainty:
             self._inflate_uncertainty()
 
-        if target_grid is not None:
-            self._interpolate(target_grid)
-            self.shape = self.mu.shape
-
     def _inflate_uncertainty(self, 
                              alpha_mean: float = 0.32, 
                              alpha_std: float = 0.32):
@@ -200,9 +205,9 @@ class BinnedImage:
         alpha_std : float
             Confidence level for inflating the standard deviation. .32 = 68% = 1 std
         """
-        # Counts are integers stored in a floating-point array. Most cells
-        # share one of only a few counts, so evaluate the expensive probability
-        # distributions once per count and reuse the scalar multipliers.
+        # Most cells share one of only a few integer sample counts, so evaluate
+        # the expensive probability distributions once per count and reuse
+        # the scalar multipliers.
         valid_counts = np.unique(self.counts[self.counts >= 2]).astype(int)
         multipliers = {}
         for count in valid_counts:
@@ -224,79 +229,6 @@ class BinnedImage:
                     std_inflation = self.sigma[i, j, k] * std_multiplier
                     self.sigma[i, j, k] = np.sqrt(mean_unc**2 + std_inflation**2)
 
-    def _interpolate(self, 
-                     target_grid: CSgrid):
-        """
-        Interpolate image, uncertainty, weight, and viewing-geometry fields
-        from the current grid to a new grid.
-
-        Parameters
-        ----------
-        target_grid : CSgrid
-            The grid to interpolate onto.
-        """
-        self.mu_    = np.copy(self.mu)
-        self.sigma_ = np.copy(self.sigma)
-        self.w_     = np.copy(self.w)
-        self.sza_   = np.copy(self.sza)
-        self.dza_   = np.copy(self.dza)
-        self.los_factor_ = np.copy(self.los_factor)
-
-        time_len    = self.shape[0]
-        ny, nx      = target_grid.shape
-
-        self.mu     = np.full((time_len, ny, nx), np.nan)
-        self.sigma  = np.full((time_len, ny, nx), np.nan)
-        self.w      = np.full((time_len, ny, nx), np.nan)
-        self.sza    = np.full((time_len, ny, nx), np.nan)
-        self.dza    = np.full((time_len, ny, nx), np.nan)
-        self.los_factor = np.full((time_len, ny, nx), np.nan)
-
-        source_fields = {
-            'mu': self.mu_,
-            'sigma': self.sigma_,
-            'w': self.w_,
-            'sza': self.sza_,
-            'dza': self.dza_,
-            'los_factor': self.los_factor_,
-        }
-
-        for i in range(time_len):
-            # Fields can share one triangulation only when they have exactly
-            # the same non-NaN source cells. Group equal masks to gain that
-            # reuse without discarding valid values from another field. If all
-            # masks differ, this naturally reproduces six independent calls.
-            mask_groups = {}
-            for name, values in source_fields.items():
-                mask = ~np.isnan(values[i])
-                mask_groups.setdefault(mask.tobytes(), []).append((name, mask))
-
-            for group in mask_groups.values():
-                names = [name for name, _ in group]
-                mask = group[0][1]
-                points = (self.grid.xi[mask], self.grid.eta[mask])
-
-                if len(names) == 1:
-                    values = source_fields[names[0]][i][mask]
-                else:
-                    values = np.column_stack([
-                        source_fields[name][i][mask] for name in names
-                    ])
-
-                interpolated = griddata(
-                    points, values,
-                    (target_grid.xi, target_grid.eta), method='linear',
-                    fill_value=np.nan
-                )
-
-                if len(names) == 1:
-                    getattr(self, names[0])[i] = interpolated
-                else:
-                    for column, name in enumerate(names):
-                        getattr(self, name)[i] = interpolated[..., column]
-
-        self.grid = dcopy(target_grid)
-
     def discard(self, f: Union[list[int], NDArray[np.int_]]):
         """
         Discard all time steps NOT listed in `f`.
@@ -313,4 +245,97 @@ class BinnedImage:
         self.sza = self.sza[f]
         self.dza = self.dza[f]
         self.los_factor = self.los_factor[f]
+        self.time = self.time[f]
+        self.ssalon = self.ssalon[f]
         self.shape = self.mu.shape
+
+    def to_nc(self, filename: str):
+        """Save one sensor's native-grid binned images to NetCDF4.
+
+        Parameters
+        ----------
+        filename : str
+            Full path to output NetCDF file.
+        """
+
+        image_fields = ("counts", "mu", "sigma", "w", "sza", "dza", "los_factor")
+        for name in image_fields:
+            if getattr(self, name).shape != self.shape:
+                raise ValueError(f"{name} and binned image dimensions do not match")
+        if self.time.size != self.shape[0]:
+            raise ValueError("time and binned image lengths do not match")
+        if np.asarray(self.ssalon).shape != (self.shape[0],):
+            raise ValueError("ssalon must contain one value per image frame")
+
+        grid_coordinates = {
+            "xi": (np.asarray(self.grid.xi), "radians"),
+            "eta": (np.asarray(self.grid.eta), "radians"),
+            "mlat": (np.asarray(self.grid.lat), "degrees"),
+            "mlt": (np.mod(np.asarray(self.grid.lon) / 15.0, 24.0), "hours"),
+        }
+        for name, (values, _) in grid_coordinates.items():
+            if values.shape != self.shape[1:]:
+                raise ValueError(f"grid {name} dimensions do not match binned images")
+
+        with Dataset(filename, "w", format="NETCDF4") as nc:
+            t, y, x = self.shape
+            nc.createDimension("time", t)
+            nc.createDimension("dim1", y)
+            nc.createDimension("dim2", x)
+
+            nc.product_type = "binned_fuv"
+            nc.schema_version = 1
+            nc.sensor = self.sensor
+            nc.image_correction = self.correction or "raw"
+            nc.los_correction = np.int8(self.los_correction)
+
+            variables = {
+                "counts": (self.counts.astype(np.int32), "i4", "1"),
+                "mu": (self.mu, "f4", "counts"),
+                "sigma": (self.sigma, "f4", "counts"),
+                "w": (self.w, "f4", "1"),
+                "sza": (self.sza, "f4", "degrees"),
+                "dza": (self.dza, "f4", "degrees"),
+                "los_factor": (self.los_factor, "f4", "1"),
+            }
+            for name, (data, dtype, units) in variables.items():
+                variable = nc.createVariable(
+                    name, dtype, ("time", "dim1", "dim2"), zlib=True
+                )
+                variable[:] = data
+                variable.units = units
+
+            nc.los_factor_definition = (
+                "Median cos(DZA) of the source pixels contributing to each "
+                "binned image value; diagnostic only and not generally an "
+                "exact multiplier between corrected and uncorrected binned "
+                "medians."
+            )
+            time_units = "seconds since 2000-01-01 00:00:00"
+            vtime = nc.createVariable("time", "f8", ("time",))
+            vtime[:] = date2num(
+                self.time.tolist(), units=time_units, calendar="standard"
+            )
+            vtime.units = time_units
+            vtime.calendar = "standard"
+            vtime.time_zone = "UTC"
+
+            ssalon = nc.createVariable("ssalon", "f4", ("time",))
+            ssalon[:] = self.ssalon
+            ssalon.units = "degrees"
+
+            grid_grp = nc.createGroup("grid")
+            grid_grp.position    = self.grid.projection.position.astype(float)
+            grid_grp.orientation = self.grid.projection.orientation
+            grid_grp.L    = self.grid.L
+            grid_grp.W    = self.grid.W
+            grid_grp.Lres = self.grid.Lres
+            grid_grp.Wres = self.grid.Wres
+            grid_grp.R    = self.grid.R
+
+            for name, (data, units) in grid_coordinates.items():
+                coordinate = grid_grp.createVariable(
+                    name, "f8", ("dim1", "dim2"), zlib=True
+                )
+                coordinate[:] = data
+                coordinate.units = units

@@ -2,6 +2,7 @@
 
 from .preimage import PreImage
 from .binnedimage import BinnedImage
+from .precipitationimage import PrecipitationImage
 from .conductanceimage import ConductanceImage
 from .grids import make_image_grids, make_wic_grid
 from .kp import load_gfz_kp, match_gfz_kp
@@ -12,6 +13,7 @@ from .zhang_paxton_lookup import load_zhang_paxton_lookup
 __all__ = [
     "PreImage",
     "BinnedImage",
+    "PrecipitationImage",
     "ConductanceImage",
     "make_image_grids",
     "make_wic_grid",

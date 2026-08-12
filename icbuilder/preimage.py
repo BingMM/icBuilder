@@ -47,6 +47,7 @@ class PreImage:
     """
 
     def __init__(self,
+                 sensor: str,
                  ncdf: Dataset,
                  index: Optional[Union[list[int], NDArray[np.int_]]] = None):
         """
@@ -54,11 +55,19 @@ class PreImage:
 
         Parameters
         ----------
+        sensor : str
+            IMAGE-FUV sensor name: ``"WIC"``, ``"SI12"``, or ``"SI13"``.
         ncdf : NetCDFFile
             NetCDF file containing image and coordinate data.
         index : Optional[list[int] or np.ndarray]
             Frame indices to load. If None, all frames are loaded.
         """
+
+        sensor = sensor.upper()
+        if sensor not in ("WIC", "SI12", "SI13"):
+            raise ValueError("sensor must be 'WIC', 'SI12', or 'SI13'")
+
+        self.sensor = sensor
         self.index = index
 
         var_names = ['mlat', 'mlon', 'mlt', 'glat', 'glon', 'img', 'dgimg', 'shimg', 'dgmodel', 'shweight', 'dgweight', 'sza', 'dza']

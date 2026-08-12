@@ -1,6 +1,7 @@
 """Regression tests for viewing geometry retained by ``BinnedImage``."""
 
 import numpy as np
+from datetime import datetime
 
 from icbuilder.binnedimage import BinnedImage
 
@@ -30,6 +31,7 @@ class _PreImage:
     """Small deterministic ``PreImage`` stand-in for geometry binning."""
 
     shape = (1, 1, 3)
+    sensor = "WIC"
     ssalon = np.array([0.0])
 
     _img = np.array([[[10.0, 20.0, 30.0]]])
@@ -68,6 +70,7 @@ def test_binned_geometry_and_los_factor_are_preserved():
     binned = BinnedImage(
         _PreImage(),
         _OneCellGrid(),
+        [datetime(2001, 1, 1)],
         correction=None,
         los_correction=True,
     )
@@ -86,6 +89,7 @@ def test_geometry_is_retained_when_los_correction_is_disabled():
     binned = BinnedImage(
         _PreImage(),
         _OneCellGrid(),
+        [datetime(2001, 1, 1)],
         correction=None,
         los_correction=False,
     )

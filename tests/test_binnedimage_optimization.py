@@ -1,9 +1,8 @@
 """Exact regression tests for the serial ``BinnedImage`` optimizations."""
 
-from copy import deepcopy
+from datetime import datetime
 
 import numpy as np
-from scipy.interpolate import griddata
 from scipy.stats import chi2, t
 
 import icbuilder.binnedimage as binned_module
@@ -46,6 +45,7 @@ class _SyntheticPreImage:
     """Two frames containing empty, partial, negative, and NaN bins."""
 
     shape = (2, 3, 4)
+    sensor = "WIC"
     ssalon = np.array([0.0, 1.0])
 
     _lon = np.array([
@@ -159,6 +159,7 @@ def test_grouped_binning_is_exactly_equal_to_cell_scanning():
     binned = BinnedImage(
         preimage,
         grid,
+        [datetime(2001, 1, 1), datetime(2001, 1, 1, 0, 1)],
         correction=None,
         los_correction=False,
     )
@@ -215,64 +216,4 @@ def test_cached_uncertainty_multipliers_preserve_scalar_result(monkeypatch):
 
     np.testing.assert_array_equal(binned.sigma, expected)
     assert calls == {"t": 3, "chi2": 3}
-
-
-class _InterpolationGrid:
-    """Minimal regular grid used to test grouped linear interpolation."""
-
-    def __init__(self, size):
-        axis = np.linspace(-1.0, 1.0, size)
-        self.xi, self.eta = np.meshgrid(axis, axis)
-        self.shape = self.xi.shape
-
-
-def test_interpolation_groups_only_fields_with_identical_masks(monkeypatch):
-    """Different masks retain their own points; equal masks share one call."""
-
-    source_grid = _InterpolationGrid(3)
-    target_grid = _InterpolationGrid(5)
-    base = np.arange(9, dtype=float).reshape(1, 3, 3)
-    fields = {
-        "mu": base.copy(),
-        "sigma": base.copy() + 10,
-        "w": base.copy() + 20,
-        "sza": base.copy() + 30,
-        "dza": base.copy() + 40,
-        "los_factor": base.copy() + 50,
-    }
-    for name in ("mu", "sigma", "w"):
-        fields[name][0, 0, 0] = np.nan
-    for name in ("sza", "dza", "los_factor"):
-        fields[name][0, 2, 2] = np.nan
-
-    expected = {}
-    for name, values in fields.items():
-        mask = ~np.isnan(values[0])
-        expected[name] = griddata(
-            (source_grid.xi[mask], source_grid.eta[mask]),
-            values[0][mask],
-            (target_grid.xi, target_grid.eta),
-            method="linear",
-            fill_value=np.nan,
-        )[None, ...]
-
-    calls = []
-    original_griddata = binned_module.griddata
-
-    def count_griddata_calls(*args, **kwargs):
-        calls.append(1)
-        return original_griddata(*args, **kwargs)
-
-    monkeypatch.setattr(binned_module, "griddata", count_griddata_calls)
-    binned = BinnedImage.__new__(BinnedImage)
-    binned.grid = source_grid
-    binned.shape = base.shape
-    for name, values in fields.items():
-        setattr(binned, name, deepcopy(values))
-
-    binned._interpolate(target_grid)
-
-    assert len(calls) == 2
-    for name, values in expected.items():
-        np.testing.assert_array_equal(getattr(binned, name), values)
 

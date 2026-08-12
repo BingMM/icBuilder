@@ -1,9 +1,9 @@
 # Current State
 
-Last reviewed: 2026-08-10
-Repository snapshot: `main` at `2e8bdf5`
-Upstream state: Kp-range, restart, and performance changes are committed;
-modular-redesign documentation is uncommitted
+Last reviewed: 2026-08-12
+Repository snapshot: `modular_pipeline` at `3724925`
+Worktree state: modular-redesign documentation and initial Product-1 and
+Product-2 implementations are uncommitted
 
 ## Current position
 
@@ -13,12 +13,16 @@ since been located and transferred to the server. The current restart logic
 can rescan the enlarged input set and process only missing or structurally
 invalid outputs; completion of that resumed run has not yet been confirmed.
 
-The user is now considering an architectural reset instead of continuing to
-patch the combined pipeline. The proposed direction separates reusable binned
-FUV observations, method-specific precipitation inference, and replaceable
-conductance forward models. Shared numerical functions would also be callable
-from icAnalyzer for VAE ensemble propagation. This is a proposed design, not
-an implementation decision. See
+The user has created the `modular_pipeline` branch for an architectural reset
+instead of continuing to patch the combined pipeline. The intended product
+sequence is binned FUV observations, method-specific precipitation energy and
+flux, Hall/Pedersen conductance from a replaceable forward model, and a later
+spline product. Shared numerical functions will live in icPhysics for use by
+both icBuilder and icAnalyzer. The sensor-specific binned product is now
+native-grid only. The precipitation product implements time matching,
+variance-aware regridding, the icPhysics boundary, and serialization. The
+conductance product consumes precipitation files and applies the selected
+icPhysics forward model without recalculating earlier stages. See
 [[Proposed Modular Pipeline Redesign]].
 
 The first-stage Zhang–Paxton (2008) integration is implemented. The orbit
@@ -51,6 +55,95 @@ causal boundary. See [[Audit - 2026-07-29]].
 
 - The repository processes IMAGE WIC, SI12, and SI13 data into Hall and
   Pedersen conductance estimates with propagated uncertainties.
+- Product 1 is implemented as separate WIC, SI12, and SI13 orbit files on the
+  sensors' native 36-by-36 and 18-by-18 grids. Each sensor retains its own
+  timestamps and frame support; the binned workflow no longer requires a
+  three-camera time intersection.
+- `PreImage` validates and stores a canonical sensor name. `BinnedImage`
+  requires one UTC `datetime` per frame and its `to_nc` writes only the binned
+  signal, statistical uncertainty, weights, native-grid sample counts,
+  SZA/DZA/LOS diagnostics, subsolar longitude, correction provenance, time,
+  sensor, and grid metadata. Kp is deliberately absent and belongs to the
+  later precipitation product.
+- `BinnedImage` is native-grid only. It no longer accepts `target_grid` or
+  contains interpolation code. Its source-pixel counts are integer-valued and
+  its NetCDF stores the actual native xi, eta, MLAT, and MLT arrays.
+- Modular NetCDF files now use explicit root descriptors with schema version
+  1: `binned_fuv`, `precipitation`, and `conductance`. The Product-1 writer
+  passed an end-to-end round trip through the new `icReader.load()` using the
+  actual nested 18-by-18 SI grid.
+- The binned-orbit script independently schedules each usable sensor orbit,
+  writes `binned/{wic,si12,si13}/or_XXXX.nc`, skips existing outputs, and
+  atomically publishes each file through a temporary `.partial` path.
+- Product-1 and Product-2 orbit discovery now use the NetCDF files actually
+  present in their input directories. The historical `*_avail_orbit.npy`
+  status files are no longer consulted.
+- `PrecipitationImage` matches only the sensors required by the selected
+  method, retains their source indices, uses the WIC grid for Product 2, and
+  explicitly regrids SI values. `image_ratio` uses WIC/SI12/SI13;
+  `zhang_paxton` uses WIC/SI12 and does not lose frames because SI13 is absent.
+  The constructor dispatches to two explicit preparation functions rather than
+  scattering method checks through one processing line. Zhang--Paxton attaches
+  SI13 one-to-one where the full three-sensor spread is within two seconds;
+  unmatched frames use source index `-1` and NaN SI13 arrays.
+- SI-to-WIC regridding now uses explicit bilinear interpolation on the verified
+  regular xi/eta grids rather than a general Delaunay triangulation. All four
+  surrounding SI cells must be finite. In the outer half of the physical SI
+  edge cells, the nearest SI cell supplies the value; this restores the 140
+  WIC boundary cells formerly lost to the centre-based interpolation domain.
+  Targets outside the physical SI grid and internal gaps remain NaN. Variance
+  uses squared bilinear weights internally and inherits the source uncertainty
+  at the nearest-cell boundary. The canonical complete 18-by-18 input covers
+  all 1,296 WIC cells. In orbit 0085, the change restored 1,900 finite SI12
+  boundary values that were previously NaN; remaining boundary NaNs trace to
+  missing source cells. Grid indices
+  and bilinear weights are calculated once per SI sensor and reused for that
+  sensor's signal, uncertainty, and quality-weight fields; each source array is
+  interpolated independently and signal/uncertainty mask differences are left
+  for later processing. SI12 and SI13 retain separate mappings. Native sample
+  counts never enter Product 2.
+- Product 2 now calls the shared SI12 proton correction once, stores the
+  corrected WIC/SI13 fields, and passes only corrected counts to the selected
+  ratio or Zhang--Paxton precipitation routine. The separated ratio path
+  matches the legacy combined calculation in a frozen numerical comparison.
+- Product 2 defines the combined observational weight: WIC/SI12/SI13 for the
+  ratio method and WIC/SI12 for Zhang--Paxton, where SI13 is diagnostic only.
+- Product 3 reads a completed precipitation file and applies the selected
+  shared conductance model without repeating binning, Kp matching, proton
+  correction, or precipitation inference. Its compact file retains the
+  precipitation and proton methods, precipitation state, combined weight,
+  conductance fields, and source provenance.
+- Product 3 now also carries `ssalon`, allowing icReader to reconstruct the
+  time-dependent magnetic-longitude grid without repeating Apex calculations.
+- Product-1 and Product-2 restarts validate schema, array dimensions, grid,
+  and requested processing settings before skipping an existing file. Product
+  3 validates that an existing file matches its input precipitation method and
+  proton settings. Configuration mismatches fail clearly instead of silently
+  mixing sensitivity datasets. Product 2 includes the recorded regridding and
+  uncertainty rules in this validation, so centre-only files are not skipped.
+- The Product-2 command line explicitly exposes the proton-correction method,
+  proton characteristic energy `Ep`, and its uncertainty `dEp`. The selected
+  values are printed before processing, stored in Product 2, carried into
+  Product 3, and exposed by the modular icReader classes.
+- `PrecipitationImage` accepts either loaded binned-image objects or WIC/SI12
+  and optional SI13 filenames. Filenames load through `icreader.load()` and are
+  retained as source provenance. If Kp is omitted, the class loads the bundled
+  local definitive GFZ series; bulk orbit processing can still supply one
+  preloaded series to avoid repeated file reads.
+- `scripts/make_precipitation_image_orbit_files.py` is now the Product-2 orbit
+  builder. It reads `binned/{wic,si12,si13}/or_XXXX.nc`, loads Kp once, and
+  writes to the user-selected output folder (default `precipitation`). The
+  method and proton settings are stored in and validated against each file.
+  Zhang--Paxton uses the WIC/SI12 orbit intersection; image ratio also requires
+  SI13. New files are published atomically through `.partial` files.
+- SI13 is now carried and SI12-proton-corrected in both precipitation methods.
+  The Product-2 NetCDF schema always includes raw/regridded SI13, uncertainty,
+  weight, corrected SI13, corrected uncertainty, and source index. If an SI13
+  orbit or frame is absent in the Zhang--Paxton path, those arrays remain NaN;
+  SI13 does not affect Zhang--Paxton E0 or WIC-derived Fe.
+- The legacy conductance orbit script still passes `target_grid` for SI12 and
+  SI13 and therefore cannot run until it is migrated to the explicit
+  precipitation/regridding stage.
 - `icbuilder/zhang_paxton_collapse.py` provides the reusable documented
   latitude collapse as direct NumPy calculations returning ordinary
   dictionaries. Diagnostic plotting and the command-line entry point are
@@ -151,7 +244,7 @@ causal boundary. See [[Audit - 2026-07-29]].
 - At zero Fe, the Robinson flux derivative is singular. dP and dH are now
   defined as one-sided conductance excursions from `Fe=0` to `Fe=dFe`. This
   remains finite below, at, and above the former 4-keV Pedersen singularity.
-- All 41 Python files under `icbuilder/`, `scripts/`, and `tests/` pass AST
+- All 47 Python files under `icbuilder/`, `scripts/`, and `tests/` pass AST
   parsing. The four collapse figure sets and the native-grid lookup diagnostic
   were visually inspected.
 - On the diagnostic grid Kp 0–9 by 0.05-hour MLT (4,800 slices), using
@@ -249,15 +342,18 @@ causal boundary. See [[Audit - 2026-07-29]].
   variability discarded by the collapse; it is not a published
   Zhang–Paxton coefficient or predictive-error estimate.
 - Replacing the ratio-derived E0 removes SI13 from that inference path.
-  **Proposed, not decided:** retain simultaneous SI13 as an optional,
-  independent radiometric validation channel. Given Zhang–Paxton E0 and the
+  **Confirmed implementation:** retain simultaneous SI13 as an optional,
+  proton-corrected diagnostic channel. Given Zhang–Paxton E0 and the
   WIC-derived Fe, predict corrected SI13 electron counts and compare them with
   observed corrected SI13. Do not invert that comparison to modify E0 or make
   SI13 availability a prerequisite for every conductance frame. WIC remains
   necessary for electron brightness and SI12 for proton correction.
-- Stage 2 remains separate: decide whether SI13 should become optional and
-  whether it can provide a useful validation product before changing common
-  frame selection, pixel support, or the combined weight.
+- The scientific validation metric based on SI13 remains to be decided; the
+  current implementation only preserves the corrected observation and its
+  availability without allowing it to alter Zhang--Paxton frame support.
+- Proton correction is now separate from precipitation inference; the
+  zero-SI12 shortcut was not used. The shared SI12-induced covariance between
+  corrected WIC and SI13 remains deferred and must be addressed explicitly.
 
 ## Other maintenance and verification gaps
 

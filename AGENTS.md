@@ -66,6 +66,18 @@ live notes when the task changes project understanding.
 
 - Write for a small research group. The expected reader is a student or
   scientist who should be able to follow the calculation from top to bottom.
+- Write for a scientist reading the code interactively in an editor. Make
+  workflows visually scannable with `#%%` sections where appropriate, blank
+  lines between conceptual stages, and short comments that identify each block.
+- Keep the main calculation linear and visible from top to bottom. Prefer
+  familiar intermediate variables and explicit operations over nested
+  expressions, generic plumbing, or compressed control flow.
+- Extract a helper when it represents a distinct calculation or removes
+  meaningful repetition. Do not hide a few obvious sequential steps behind an
+  abstraction merely to shorten the main function.
+- Comments may serve as navigational headings even when the underlying Python
+  is straightforward. Treat formatter conventions and line-length targets as
+  secondary to human readability, while avoiding ambiguous or unwieldy code.
 - Use nearby code as the stylistic baseline, not as a ceiling. Do not copy weak
   patterns blindly: identify scientific, numerical, or code choices that could
   be improved, explain the tradeoff, and propose a clearer or safer alternative.

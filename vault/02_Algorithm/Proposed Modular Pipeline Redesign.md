@@ -1,7 +1,8 @@
 # Proposed Modular Pipeline Redesign
 
-Last reviewed: 2026-08-10
-Status: Proposed by the user; architecture under discussion, not authorized for implementation
+Last reviewed: 2026-08-11
+Status: Product stages confirmed on `modular_pipeline`; native Product 1 and
+the initial Product-2 boundary are implemented and verified
 
 ## Motivation
 
@@ -32,6 +33,29 @@ or disguising the reusable binned observations.
 The three channels do not need to be forced onto identical frame support in
 this product. Later methods can select the channels they require.
 
+The existing `BinnedImage` represents one sensor, not a combined WIC/SI12/SI13
+orbit. Preserving that meaning suggests one binned file per sensor and orbit,
+or otherwise distinct sensor time dimensions. A single three-camera time axis
+would preserve the current SI13 restriction and prevent the Zhang--Paxton path
+from using otherwise valid WIC/SI12 frames.
+
+The implemented Product-1 layout is:
+
+```text
+binned/wic/or_XXXX.nc
+binned/si12/or_XXXX.nc
+binned/si13/or_XXXX.nc
+```
+
+WIC remains on its native 36-by-36 grid and SI12/SI13 on their native
+18-by-18 grid. Each sensor orbit is selected and processed independently.
+Files contain binned signal and uncertainty, weights, native-grid source
+counts, sensor time, SZA/DZA/LOS diagnostics, subsolar longitude, correction
+provenance, and reconstructable grid metadata. Kp is intentionally excluded;
+it belongs to precipitation inference. `BinnedImage` is strictly native-grid
+and contains no interpolation path. Its NetCDF stores the actual xi, eta,
+MLAT, and MLT arrays alongside integer source-pixel counts.
+
 ### 2. Precipitation inference
 
 Read the binned product, perform the SI12-based proton correction, and store
@@ -52,6 +76,24 @@ Each product should preserve method, coefficients or lookup provenance,
 assumed proton energy, masks, units, uncertainties, covariance terms, and the
 identity of its binned source product. Corrected WIC/SI13 belong here because
 they make the energy/flux calculation inspectable without repeating binning.
+
+`PrecipitationImage` is implemented as the initial Product-2 boundary. It
+matches only the sensors required by each method, records source indices, and
+regrids SI data onto the WIC grid. Because both grids are regular and exactly
+nested in xi/eta, the implementation uses explicit four-cell bilinear weights
+rather than a general scattered-point triangulation. All four source values
+must be finite. Targets in the outer half of a physical boundary cell use that
+nearest SI cell, while internal gaps and targets outside the physical grid
+remain NaN. Variance is propagated with squared bilinear weights internally;
+boundary targets inherit the source-cell uncertainty. Each array is
+interpolated independently;
+the interpolation stage does not impose matching finite support between signal
+and uncertainty. Sample counts remain only in Product 1.
+
+The class accepts an injected physics function for controlled comparisons and
+otherwise selects the corresponding shared icPhysics precipitation function.
+No equations are copied into `PrecipitationImage`, and it contains no
+Hall/Pedersen calculation.
 
 ### 3. Conductance forward model
 
@@ -80,6 +122,19 @@ binned FUV
 
 Changing a downstream model then regenerates only its own stage.
 
+`ConductanceImage` remains suitable for this stage after it is changed to
+consume a precipitation product rather than three `BinnedImage` objects. A
+fourth `SplineImage` product remains explicitly deferred.
+
+### NetCDF boundary
+
+Each product class should have its own `to_nc` implementation and later its
+own corresponding reader because each schema has different scientific
+variables and provenance. Reusing the method name is useful; sharing one large
+generic serializer is not. A small icBuilder-only helper may write repeated
+time, grid, weight, Kp, source-product, units, and product-type metadata.
+Avoid a base product class or inheritance hierarchy.
+
 ## Shared use by icAnalyzer
 
 **Confirmed dependency constraint:** icAnalyzer must not depend on the full
@@ -88,8 +143,8 @@ are not needed in the VAE environment and should not propagate into
 icAnalyzer.
 
 The numerical proton correction, camera-response conversion, energy/flux
-inference, and conductance forward models should therefore live in a small
-shared physics package below both projects, rather than in scripts,
+inference, and conductance forward models should therefore live in the new
+`icPhysics` package below both projects, rather than in scripts,
 `ConductanceImage` methods, or the icBuilder distribution. `icBuilder` and
 `icAnalyzer` can then call exactly the same functions for orbit processing and
 each VAE or Monte-Carlo realization.
@@ -100,7 +155,7 @@ The intended dependency direction is:
 ZhangPaxton2008
         |
         v
-shared conductance/precipitation physics
+icPhysics
         |                         |
         v                         v
 icBuilder                     icAnalyzer
@@ -156,13 +211,13 @@ observation noise, and respect the channels' different effective resolutions.
 
 ## Next design decision
 
-Decide whether to adopt the three-stage product boundary above. If accepted,
-the smallest prototype is one orbit processed as:
+The `PrecipitationImage` API, NetCDF schema, and method-specific orbit builder
+are now implemented. Continue the smallest prototype as:
 
-1. one reusable binned-FUV file;
-2. separate ratio and Zhang--Paxton precipitation files;
-3. a Robinson conductance file generated from one precipitation file;
-4. direct calls to the same precipitation and Robinson functions from a small
+1. load a precipitation product through `icReader.load()`;
+2. generate a Robinson conductance file from that precipitation file without
+   repeating binning or precipitation inference;
+3. call the same precipitation and Robinson functions from a small
    icAnalyzer-side test.
 
 No full-corpus regeneration or VAE redesign should begin until this boundary
