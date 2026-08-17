@@ -7,6 +7,7 @@ from secsy import CSgrid
 from copy import deepcopy as dcopy
 from scipy.stats import t, chi2
 from .preimage import PreImage
+from .footprints import overlap_mapping, overlap_mean, overlap_statistics
 from netCDF4 import Dataset, date2num
 from datetime import datetime
 
@@ -16,28 +17,31 @@ class BinnedImage:
     """
     A class to bin IMAGE data onto a CSgrid.
 
-    This class processes a `PreImage` object and computes binned statistics
-    (median and standard deviation) for each native sensor-grid cell, with an
-    option to inflate the uncertainties for small sample counts.
+    This class processes a `PreImage` object using either footprint-overlap
+    averaging or the former point-centre median calculation.
 
     Attributes
     ----------
     grid : CSgrid
         The native sensor CSgrid to which data is binned.
     counts : np.ndarray
-        Number of samples contributing to each grid cell.
+        Number of source pixels contributing to each grid cell.
     mu : np.ndarray
-        Mean (median) of the binned values in each grid cell.
+        Footprint-weighted mean or point-centre median in each grid cell.
     sigma : np.ndarray
-        Standard deviation of the values in each grid cell.
+        Provisional within-cell spread of the contributing values.
+    coverage : np.ndarray
+        Fraction of each target cell covered by valid detector footprints.
+        This is NaN for the legacy centre-binning method.
     sza : np.ndarray
-        Median solar zenith angle of contributing pixels [degrees].
+        Overlap-weighted mean or point-centre median solar zenith angle
+        [degrees].
     dza : np.ndarray
-        Median detector zenith angle of contributing pixels [degrees].
+        Overlap-weighted mean or point-centre median detector zenith angle
+        [degrees].
     los_factor : np.ndarray
-        Median ``cos(DZA)`` of contributing pixels. This is a diagnostic
-        summary of the pixel-level correction factors, not an exact factor
-        relating the corrected and uncorrected binned medians.
+        Overlap-weighted mean or point-centre median ``cos(DZA)``. This is a
+        diagnostic summary of the pixel-level correction factors.
     los_correction : bool
         Whether the pixel-level ``cos(DZA)`` correction was applied.
     shape : tuple
@@ -50,7 +54,8 @@ class BinnedImage:
                  time: Union[NDArray[datetime], list[datetime]],
                  inflate_uncertainty: bool = False,
                  correction: Optional[str] = None,
-                 los_correction: bool = True
+                 los_correction: bool = True,
+                 binning_method: str = "footprint",
                  ):
         """
         Bin statistics from a PreImage object into a CSgrid.
@@ -60,7 +65,7 @@ class BinnedImage:
         pI : PreImage
             Input IMAGE data to bin.
         grid : CSgrid
-            Cubbed sphere grid to bin onto.
+            Cubed-sphere grid to bin onto.
         time : np.ndarray or list of datetime
             UTC timestamp for each frame in ``pI``.
         inflate_uncertainty : bool
@@ -72,6 +77,10 @@ class BinnedImage:
         los_correction : bool
             If True, multiply each source pixel by ``cos(DZA)`` before
             calculating the binned image statistics.
+        binning_method : {"footprint", "centre"}
+            ``"footprint"`` distributes each detector pixel according to its
+            inferred area overlap with the target cells. ``"centre"`` keeps
+            the previous point-centre median calculation.
         """
         self.sensor = pI.sensor
         self.time = np.asarray(time, dtype=object)
@@ -79,10 +88,13 @@ class BinnedImage:
             raise ValueError("time must contain one timestamp per image frame")
         if correction not in (None, "SH", "DG"):
             raise ValueError("correction must be None, 'SH', or 'DG'")
+        if binning_method not in ("footprint", "centre"):
+            raise ValueError("binning_method must be 'footprint' or 'centre'")
 
         self.grid = dcopy(grid)
         self.correction = correction
         self.los_correction = bool(los_correction)
+        self.binning_method = binning_method
 
         time_len, ny, nx = pI.shape[0], grid.shape[0], grid.shape[1]
         shape = (time_len, ny, nx)
@@ -93,103 +105,126 @@ class BinnedImage:
         self.sza = np.full(shape, np.nan)
         self.dza = np.full(shape, np.nan)
         self.los_factor = np.full(shape, np.nan)
+        self.coverage = np.full(shape, np.nan)
         self.shape = self.counts.shape
         self.ssalon = pI.ssalon
 
         for i in range(time_len):
-            #lat, lon = pI.get_mcoords(i) # Get magnetic coordinates
-            lat, _, mlt, _ = pI.get_mcoords(i) # Get magnetic coordinates
-            lon = mlt*15
-            if correction == 'SH':
-                if los_correction:
-                    img = pI.get_shimg_los(i) # Get the SH corrected image
-                else:
-                    img = pI.get_shimg(i) # Get the SH corrected image
-            elif correction == 'DG':
-                if los_correction:
-                    img = pI.get_dgimg_los(i) # Get the DG corrected image
-                else:
-                    img = pI.get_dgimg(i) # Get the DG corrected image
+            lat, _, mlt, _ = pI.get_mcoords(i)
+            img, w, sza, dza = self._frame_fields(pI, i)
+
+            if self.binning_method == "footprint":
+                self._bin_footprints(i, lat, mlt, img, w, sza, dza)
             else:
-                if los_correction:
-                    img = pI.get_img_los(i) # Get the LOS-corrected raw image
-                else:
-                    img = pI.get_img(i) # Get the raw image
-            w = pI.get_dgw(i) * pI.get_shw(i) # Get and combine weights
-            sza = pI.get_SZA(i)
-            dza = pI.get_DZA(i)
-
-            # ``bin_index`` returns one flattened grid-cell index per source
-            # pixel. Sort those indices once, preserving source-pixel order
-            # within each cell, and then work only on populated cells. The old
-            # implementation scanned every source pixel for every grid cell.
-            j, k = grid.bin_index(lon, lat)
-            valid_bin = (j >= 0) & (j < ny) & (k >= 0) & (k < nx)
-            source_index = np.flatnonzero(valid_bin)
-            flat_bin = j[valid_bin] * nx + k[valid_bin]
-            order = np.argsort(flat_bin, kind='stable')
-            source_index = source_index[order]
-            flat_bin = flat_bin[order]
-
-            # Flatten each source field once. A stable bin sort means that the
-            # values inside a cell retain their original order, preserving the
-            # floating-point arithmetic of the previous implementation.
-            img_flat = img.flatten()
-            w_flat = w.flatten()
-            sza_flat = sza.flatten()
-            dza_flat = dza.flatten()
-
-            if flat_bin.size:
-                starts = np.r_[0, np.flatnonzero(np.diff(flat_bin)) + 1]
-                stops = np.r_[starts[1:], flat_bin.size]
-            else:
-                starts, stops = [], []
-
-            for start, stop in zip(starts, stops):
-                jj, kk = divmod(flat_bin[start], nx)
-                id_ = (i, jj, kk)
-                indices = source_index[start:stop]
-
-                # Keep the historical count semantics: cells begin with the
-                # number of geometrically valid pixels. Counts are reduced for
-                # NaN image values only when at least two image values remain.
-                self.counts[id_] = stop - start
-                if self.counts[id_] < 2:
-                    continue
-
-                values = img_flat[indices]
-                fnan = np.isnan(values)
-                if np.sum(~fnan) < 2:
-                    continue
-                if np.any(fnan):
-                    self.counts[id_] -= np.sum(fnan)
-
-                median_val = np.nanmedian(values)
-                self.mu[id_] = max(median_val, 0)  # zero if negative
-                self.sigma[id_] = np.nanstd(values)
-
-                # Preserve viewing geometry for the same source pixels that
-                # contributed to the image statistics. The median cosine is a
-                # diagnostic because correction occurs before image binning.
-                valid_image = ~fnan
-                sza_values = sza_flat[indices][valid_image]
-                dza_values = dza_flat[indices][valid_image]
-                finite_sza = np.isfinite(sza_values)
-                finite_dza = np.isfinite(dza_values)
-                if np.any(finite_sza):
-                    self.sza[id_] = np.median(sza_values[finite_sza])
-                if np.any(finite_dza):
-                    self.dza[id_] = np.median(dza_values[finite_dza])
-                    self.los_factor[id_] = np.median(
-                        np.cos(np.radians(dza_values[finite_dza]))
-                    )
-
-                # Weights retain their historical independent NaN handling;
-                # an image NaN does not remove the corresponding weight.
-                self.w[id_] = np.nanmedian(w_flat[indices])
+                self._bin_centres(i, lat, mlt, img, w, sza, dza)
                             
         if inflate_uncertainty:
+            # This is the existing small-sample treatment. Its use with the
+            # provisional footprint spread is retained for now so footprint
+            # geometry and measurement uncertainty can be treated separately.
             self._inflate_uncertainty()
+
+    def _frame_fields(self, preimage, index):
+        """Return the image and diagnostic source fields for one frame."""
+
+        if self.correction == "SH":
+            if self.los_correction:
+                image = preimage.get_shimg_los(index)
+            else:
+                image = preimage.get_shimg(index)
+        elif self.correction == "DG":
+            if self.los_correction:
+                image = preimage.get_dgimg_los(index)
+            else:
+                image = preimage.get_dgimg(index)
+        else:
+            if self.los_correction:
+                image = preimage.get_img_los(index)
+            else:
+                image = preimage.get_img(index)
+
+        weight = preimage.get_dgw(index) * preimage.get_shw(index)
+        return image, weight, preimage.get_SZA(index), preimage.get_DZA(index)
+
+    def _bin_footprints(self, frame, lat, mlt, image, weight, sza, dza):
+        """Distribute uniform detector footprints over intersected CS cells."""
+
+        mapping, cell_area = overlap_mapping(lat, mlt, self.grid)
+        output_shape = self.grid.shape
+
+        mean, spread, count, coverage = overlap_statistics(
+            image, mapping, cell_area, output_shape
+        )
+        self.mu[frame] = np.maximum(mean, 0)
+        self.sigma[frame] = spread
+        self.counts[frame] = count
+        self.coverage[frame] = coverage
+
+        # Geometry describes the same valid detector pixels as the image.
+        valid_image = np.isfinite(image)
+        masked_sza = np.where(valid_image, sza, np.nan)
+        masked_dza = np.where(valid_image, dza, np.nan)
+        masked_los = np.where(valid_image, np.cos(np.radians(dza)), np.nan)
+
+        self.sza[frame], _ = overlap_mean(masked_sza, mapping, output_shape)
+        self.dza[frame], _ = overlap_mean(masked_dza, mapping, output_shape)
+        self.los_factor[frame], _ = overlap_mean(
+            masked_los, mapping, output_shape
+        )
+
+        # Retain the historical independent NaN handling for quality weights.
+        self.w[frame], _ = overlap_mean(weight, mapping, output_shape)
+
+    def _bin_centres(self, frame, lat, mlt, image, weight, sza, dza):
+        """Keep the former point-centre median calculation available."""
+
+        ny, nx = self.grid.shape
+        longitude = mlt * 15
+        j, k = self.grid.bin_index(longitude, lat)
+        valid_bin = (j >= 0) & (j < ny) & (k >= 0) & (k < nx)
+        source_index = np.flatnonzero(valid_bin)
+        flat_bin = j[valid_bin] * nx + k[valid_bin]
+        order = np.argsort(flat_bin, kind="stable")
+        source_index = source_index[order]
+        flat_bin = flat_bin[order]
+
+        image = image.flatten()
+        weight = weight.flatten()
+        sza = sza.flatten()
+        dza = dza.flatten()
+
+        if flat_bin.size:
+            starts = np.r_[0, np.flatnonzero(np.diff(flat_bin)) + 1]
+            stops = np.r_[starts[1:], flat_bin.size]
+        else:
+            starts, stops = [], []
+
+        for start, stop in zip(starts, stops):
+            jj, kk = divmod(flat_bin[start], nx)
+            output_index = (frame, jj, kk)
+            indices = source_index[start:stop]
+
+            values = image[indices]
+            finite = np.isfinite(values)
+            self.counts[output_index] = np.sum(finite)
+            if not np.any(finite):
+                continue
+
+            finite_values = values[finite]
+            self.mu[output_index] = max(np.median(finite_values), 0)
+            self.sigma[output_index] = np.std(finite_values)
+
+            sza_values = sza[indices][finite]
+            dza_values = dza[indices][finite]
+            if np.any(np.isfinite(sza_values)):
+                self.sza[output_index] = np.nanmedian(sza_values)
+            if np.any(np.isfinite(dza_values)):
+                self.dza[output_index] = np.nanmedian(dza_values)
+                self.los_factor[output_index] = np.nanmedian(
+                    np.cos(np.radians(dza_values))
+                )
+
+            self.w[output_index] = np.nanmedian(weight[indices])
 
     def _inflate_uncertainty(self, 
                              alpha_mean: float = 0.32, 
@@ -245,6 +280,7 @@ class BinnedImage:
         self.sza = self.sza[f]
         self.dza = self.dza[f]
         self.los_factor = self.los_factor[f]
+        self.coverage = self.coverage[f]
         self.time = self.time[f]
         self.ssalon = self.ssalon[f]
         self.shape = self.mu.shape
@@ -258,7 +294,10 @@ class BinnedImage:
             Full path to output NetCDF file.
         """
 
-        image_fields = ("counts", "mu", "sigma", "w", "sza", "dza", "los_factor")
+        image_fields = (
+            "counts", "mu", "sigma", "w", "sza", "dza", "los_factor",
+            "coverage",
+        )
         for name in image_fields:
             if getattr(self, name).shape != self.shape:
                 raise ValueError(f"{name} and binned image dimensions do not match")
@@ -288,6 +327,7 @@ class BinnedImage:
             nc.sensor = self.sensor
             nc.image_correction = self.correction or "raw"
             nc.los_correction = np.int8(self.los_correction)
+            nc.binning_method = self.binning_method
 
             variables = {
                 "counts": (self.counts.astype(np.int32), "i4", "1"),
@@ -297,6 +337,7 @@ class BinnedImage:
                 "sza": (self.sza, "f4", "degrees"),
                 "dza": (self.dza, "f4", "degrees"),
                 "los_factor": (self.los_factor, "f4", "1"),
+                "coverage": (self.coverage, "f4", "1"),
             }
             for name, (data, dtype, units) in variables.items():
                 variable = nc.createVariable(
@@ -305,12 +346,36 @@ class BinnedImage:
                 variable[:] = data
                 variable.units = units
 
-            nc.los_factor_definition = (
-                "Median cos(DZA) of the source pixels contributing to each "
-                "binned image value; diagnostic only and not generally an "
-                "exact multiplier between corrected and uncorrected binned "
-                "medians."
-            )
+            if self.binning_method == "footprint":
+                nc.counts_definition = (
+                    "Number of valid detector footprints intersecting each cell."
+                )
+                nc.sigma_definition = (
+                    "Provisional overlap-weighted within-cell spread; retained "
+                    "for compatibility and not a complete measurement uncertainty."
+                )
+                nc.los_factor_definition = (
+                    "Overlap-weighted mean cos(DZA) of valid detector footprints."
+                )
+                nc.coverage_definition = (
+                    "Fraction of projected CS-cell area covered by valid detector "
+                    "footprints under a uniform top-hat response assumption."
+                )
+            else:
+                nc.counts_definition = (
+                    "Number of valid detector-pixel centres inside each cell."
+                )
+                nc.sigma_definition = (
+                    "Point-centre within-cell spread; provisional and not a "
+                    "complete measurement uncertainty."
+                )
+                nc.los_factor_definition = (
+                    "Median cos(DZA) of the source pixels contributing to each "
+                    "binned image value; diagnostic only."
+                )
+                nc.coverage_definition = (
+                    "Unavailable for centre binning; stored as NaN."
+                )
             time_units = "seconds since 2000-01-01 00:00:00"
             vtime = nc.createVariable("time", "f8", ("time",))
             vtime[:] = date2num(
