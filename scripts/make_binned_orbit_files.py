@@ -23,11 +23,13 @@ SENSORS = {
     "SI12": {"folder": "s12", "prefix": "s12", "grid": "si", "correction": "DG"},
     "SI13": {"folder": "s13", "prefix": "s13", "grid": "si", "correction": "DG"}}
 
-BINNED_FIELDS = ("counts", "mu", "sigma", "w", "sza", "dza", "los_factor")
+BINNED_FIELDS = (
+    "counts", "mu", "sigma", "w", "sza", "dza", "los_factor", "coverage"
+)
 
 #%%
 
-def safe_apex_convert(apex, time, glat, glon, height=110):
+def safe_apex_convert(apex, time, glat, glon, height=130):
     """Convert the finite geographic pixels in one frame."""
     valid = np.isfinite(glat) & np.isfinite(glon)
     mlat = np.full_like(glat, np.nan)
@@ -36,9 +38,7 @@ def safe_apex_convert(apex, time, glat, glon, height=110):
     ssalon = np.nan
 
     if np.any(valid):
-        mlat_valid, mlon_valid = apex.convert(
-            glat[valid], glon[valid], "geo", "apex", height=height
-        )
+        mlat_valid, mlon_valid = apex.convert(glat[valid], glon[valid], "geo", "apex", height=height)
         mlat[valid] = mlat_valid
         mlon[valid] = mlon_valid
 
@@ -60,6 +60,7 @@ def save_binned_file(binned, filename):
             binned.sensor,
             binned.correction or "raw",
             binned.los_correction,
+            binned.binning_method,
         )
         if status != "complete":
             raise RuntimeError(f"incomplete binned file: {partial}")
@@ -69,7 +70,8 @@ def save_binned_file(binned, filename):
             partial.unlink()
 
 
-def binned_file_status(filename, sensor, correction, los_correction):
+def binned_file_status(filename, sensor, correction, los_correction,
+                       binning_method):
     """Return missing, invalid, mismatch, or complete for one Product-1 file."""
 
     filename = Path(filename)
@@ -84,6 +86,7 @@ def binned_file_status(filename, sensor, correction, los_correction):
                 nc.sensor != sensor
                 or nc.image_correction != correction
                 or bool(nc.los_correction) != bool(los_correction)
+                or nc.binning_method != binning_method
             ):
                 return "mismatch"
 
@@ -111,7 +114,8 @@ def binned_file_status(filename, sensor, correction, los_correction):
 
 
 def process_sensor_orbit(task, input_paths, output_dir, grid_wic, grid_si,
-                         fullness_threshold=0.1, los_correction=False):
+                         fullness_threshold=0.1, los_correction=False,
+                         binning_method="footprint"):
     """Bin one sensor orbit on that sensor's native grid."""
     sensor, orbit = task
     
@@ -138,7 +142,7 @@ def process_sensor_orbit(task, input_paths, output_dir, grid_wic, grid_si,
 
     # Convert to apex coordinates
     for i, frame_time in enumerate(time):        
-        apex = apexpy.Apex(frame_time)
+        apex = apexpy.Apex(frame_time, refh=130)
         converted = safe_apex_convert(apex, frame_time, preimage.glat[i], preimage.glon[i]) 
         preimage.mlat[i], preimage.mlon[i], preimage.mlt[i], preimage.ssalon[i] = converted
 
@@ -153,7 +157,8 @@ def process_sensor_orbit(task, input_paths, output_dir, grid_wic, grid_si,
     binned = BinnedImage(preimage, grid, time, 
                          inflate_uncertainty=True, 
                          correction=settings["correction"], 
-                         los_correction=los_correction)
+                         los_correction=los_correction,
+                         binning_method=binning_method)
     
     # Save and return
     filename = output_dir / sensor.lower() / f"or_{orbit:04d}.nc"
@@ -196,6 +201,12 @@ def parse_args(argv=None):
     parser.add_argument("--s12-folder", default="s12")
     parser.add_argument("--s13-folder", default="s13")
     parser.add_argument("--output-folder", default="binned")
+    parser.add_argument(
+        "--binning-method",
+        choices=("footprint", "centre"),
+        default="footprint",
+        help="Use footprint overlap or the former point-centre median binning.",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args(argv)
 
@@ -211,6 +222,8 @@ def main(argv=None):
     output_dir = base / args.output_folder
     
     grid_wic, grid_si = make_image_grids()
+
+    print(f"Binning method: {args.binning_method}")
 
     tasks = []
     for sensor, settings in SENSORS.items():
@@ -231,6 +244,7 @@ def main(argv=None):
                 sensor,
                 settings["correction"],
                 False,
+                args.binning_method,
             )
             if status == "mismatch":
                 raise ValueError(
@@ -253,6 +267,7 @@ def main(argv=None):
         output_dir=output_dir,
         grid_wic=grid_wic,
         grid_si=grid_si,
+        binning_method=args.binning_method,
     )
     if args.parallel:
         return process_map(
