@@ -71,7 +71,8 @@ def match_sensor_times(*sensor_times):
 #%% Spatial interpolation
 
 REGRID_METHOD = (
-    "Bilinear interpolation between regular Cubed-Sphere cell centres; "
+    "Direct copy when source and target grids are identical; otherwise "
+    "bilinear interpolation between regular Cubed-Sphere cell centres and "
     "nearest source cell at the physical grid boundary"
 )
 REGRID_UNCERTAINTY = (
@@ -205,6 +206,20 @@ def regrid_to_target(values, mapping, propagate_uncertainty=False):
     return target_values
 
 
+def grids_are_identical(source_grid, target_grid):
+    """Return True when two grids describe the same cell centres."""
+
+    if source_grid.shape != target_grid.shape:
+        return False
+
+    return (
+        np.allclose(source_grid.xi, target_grid.xi)
+        and np.allclose(source_grid.eta, target_grid.eta)
+        and np.allclose(source_grid.lat, target_grid.lat)
+        and np.allclose(source_grid.lon, target_grid.lon)
+    )
+
+
 def prepare_si_sensor(sensor, indices, target_grid):
     """Place one SI sensor on the Product-2 time axis and WIC grid."""
 
@@ -217,8 +232,18 @@ def prepare_si_sensor(sensor, indices, target_grid):
     if not np.any(matched):
         return values, sigma, weight
 
-    mapping = make_regrid_mapping(sensor.grid, target_grid)
     sensor_indices = indices[matched]
+
+    # Do not let four-neighbour interpolation enlarge holes when the SI data
+    # are already on exactly the requested grid. Preserve every value, NaN,
+    # uncertainty, and weight cell-for-cell.
+    if grids_are_identical(sensor.grid, target_grid):
+        values[matched] = np.asarray(sensor.mu)[sensor_indices]
+        sigma[matched] = np.asarray(sensor.sigma)[sensor_indices]
+        weight[matched] = np.asarray(sensor.w)[sensor_indices]
+        return values, sigma, weight
+
+    mapping = make_regrid_mapping(sensor.grid, target_grid)
     values[matched] = regrid_to_target(sensor.mu[sensor_indices], mapping)
     sigma[matched] = regrid_to_target(sensor.sigma[sensor_indices], mapping, propagate_uncertainty=True)
     weight[matched] = regrid_to_target(sensor.w[sensor_indices], mapping)
