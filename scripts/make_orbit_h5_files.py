@@ -1,78 +1,64 @@
-#%% Import
+"""Index the raw IMAGE IDL files by orbit."""
+
+#%% Imports
+
+import argparse
+from pathlib import Path
 
 import pandas as pd
-import glob
-
-#%% Base
-
-base = '/Home/siv32/mih008/repos/icBuilder/example_data/'
-
-#%% Premade orbit file from WIC, not complete list only published corrected data
-
-orbit_dates = base + 'orbitdates.csv'
-
-#%% Import orbit file
-
-print('Reading orbit date from NIRD file')
-orbits = pd.read_csv(orbit_dates)
-
-# Convert str to dt
-orbits['dt_start'] = pd.to_datetime(orbits['date_start'],format='%Y-%m-%d %H:%M:%S')
-orbits['dt_end'] = pd.to_datetime(orbits['date_end'],format='%Y-%m-%d %H:%M:%S')
-
-#%% Path to SI12 and SI13
 
 
-wic_path = base + 'wic_data/'
-s12_path = base + 's12_data/'
-s13_path = base + 's13_data/'
+#%% Command line
 
-#%% get file names
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--base",
+    type=Path,
+    default=Path(__file__).resolve().parents[1] / "example_data",
+    help="Directory containing orbitdates.csv and the *_data folders",
+)
+args = parser.parse_args()
+base = args.base.expanduser()
 
-print('Getting wic file names')
-wic_fn = sorted(glob.glob(wic_path + '*.idl'))
-print('Getting s12 file names')
-s12_fn = sorted(glob.glob(s12_path + '*.idl'))
-print('Getting s13 file names')
-s13_fn = sorted(glob.glob(s13_path + '*.idl'))
 
-#%% functions
+#%% Orbit intervals
 
-def generate_files_file(fn):
-    # Allocate space
-    df = pd.DataFrame()
+print(f"Reading orbit dates from {base / 'orbitdates.csv'}")
+orbits = pd.read_csv(base / "orbitdates.csv")
+orbits["dt_start"] = pd.to_datetime(orbits["date_start"], format="%Y-%m-%d %H:%M:%S")
+orbits["dt_end"] = pd.to_datetime(orbits["date_end"], format="%Y-%m-%d %H:%M:%S")
 
-    # Date and filename
-    df['date'] = [pd.to_datetime(file[-15:-4],format='%Y%j%H%M') for file in fn]
-    df['filename']=[file[-18:] for file in fn]
 
-    # Orbit number
-    df['orbit'] = -1
-    df['orbit'] = df['orbit'].astype('int64')
+#%% Build one sensor index
 
-    for _, row in orbits.iterrows():
-        mask = (df['date'] >= row['dt_start']) & (df['date'] <= row['dt_end'])
-        df.loc[mask, 'orbit'] = row['orbit_number']
-    df = df.loc[df['orbit']!=-1, :].reset_index().drop(columns='index')
+def generate_files_file(folder):
+    filenames = sorted(folder.glob("*.idl"))
 
-    df.set_index('date', inplace=True)
-    
-    return df
+    files = pd.DataFrame()
+    files["date"] = [
+        pd.to_datetime(filename.stem[-11:], format="%Y%j%H%M")
+        for filename in filenames
+    ]
+    files["filename"] = [filename.name for filename in filenames]
+    files["orbit"] = -1
 
-#%% wic
+    for _, orbit in orbits.iterrows():
+        inside_orbit = (
+            (files["date"] >= orbit["dt_start"])
+            & (files["date"] <= orbit["dt_end"])
+        )
+        files.loc[inside_orbit, "orbit"] = orbit["orbit_number"]
 
-print('Generating wic files file')
-df = generate_files_file(wic_fn)
-df.to_hdf(base + 'wicfiles.h5', key='data', mode='w')
+    files = files.loc[files["orbit"] != -1].copy()
+    files["orbit"] = files["orbit"].astype("int64")
+    files.set_index("date", inplace=True)
+    return files
 
-#%% s12
 
-print('Generating s12 files file')
-df = generate_files_file(s12_fn)
-df.to_hdf(base + 's12files.h5', key='data', mode='w')
+#%% Write WIC, SI12, and SI13 indices
 
-#%% s13
-
-print('Generating s13 files file')
-df = generate_files_file(s13_fn)
-df.to_hdf(base + 's13files.h5', key='data', mode='w')
+for prefix, folder in (("wic", "wic_data"), ("s12", "s12_data"), ("s13", "s13_data")):
+    print(f"Indexing {prefix.upper()} IDL files")
+    files = generate_files_file(base / folder)
+    files.to_hdf(base / f"{prefix}files.h5", key="data", mode="w")
+    print(f"  {len(files)} files in {files.orbit.nunique()} orbits")
