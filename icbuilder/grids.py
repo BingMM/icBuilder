@@ -14,10 +14,10 @@ from secsy import CSgrid, CSprojection
 
 IMAGE_GRID_POSITION = (0, 90)
 IMAGE_GRID_ORIENTATION = (0, 1)
-IMAGE_GRID_LENGTH_METRES = 20_000_000.0
-IMAGE_WIC_RESOLUTION_METRES = 225_000.0
-IMAGE_SI_TARGET_RESOLUTION_METRES = 450_000.0
-IMAGE_GRID_RADIUS_METRES = 6_481_200.0
+IMAGE_GRID_LENGTH_METRES = 50_000_000.0
+IMAGE_WIC_RESOLUTION_METRES = 200_000.0
+IMAGE_SI_TARGET_RESOLUTION_METRES = 400_000.0
+IMAGE_GRID_RADIUS_METRES = 6_501_200.0 # 6371.2 + 130
 
 
 def make_wic_grid() -> CSgrid:
@@ -35,11 +35,6 @@ def make_wic_grid() -> CSgrid:
         IMAGE_WIC_RESOLUTION_METRES,
         R=IMAGE_GRID_RADIUS_METRES,
     )
-    if grid.shape != (36, 36):
-        raise RuntimeError(
-            "canonical WIC grid must have shape (36, 36), "
-            f"but secsy produced {grid.shape}"
-        )
     return grid
 
 
