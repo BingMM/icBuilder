@@ -17,7 +17,10 @@ from icbuilder import ConductanceImage
 
 #%% File handling
 
-REQUIRED_FIELDS = ("E0", "dE0", "Fe", "dFe", "varE0Fe", "P", "H", "dP", "dH", "w")
+REQUIRED_FIELDS = (
+    "Ep_model", "Ep", "dEp", "Ep_clipping_flag", "Fp", "dFp",
+    "E0", "dE0", "Fe", "dFe", "varE0Fe", "P", "H", "dP", "dH", "w",
+)
 
 
 def get_orbits(input_dir):
@@ -40,7 +43,7 @@ def conductance_file_is_complete(filename):
 
     try:
         with Dataset(filename) as nc:
-            if nc.product_type != "conductance" or int(nc.schema_version) != 1:
+            if nc.product_type != "conductance" or int(nc.schema_version) != 2:
                 return False
             shape = (
                 len(nc.dimensions["time"]),
@@ -56,7 +59,8 @@ def conductance_file_is_complete(filename):
                 if nc.variables[name].shape != (shape[0],):
                     return False
             nc.getncattr("precipitation_method")
-            nc.getncattr("proton_method")
+            nc.getncattr("proton_flux_source")
+            nc.getncattr("proton_energy_model")
             nc.getncattr("conductance_model")
             nc.groups["grid"]
     except (OSError, RuntimeError, KeyError, AttributeError, ValueError):
@@ -73,18 +77,25 @@ def conductance_matches_precipitation(filename, precipitation_file):
 
     try:
         with Dataset(filename) as conductance, Dataset(precipitation_file) as precipitation:
-            return (
+            matches = (
                 conductance.precipitation_method == precipitation.method
-                and conductance.proton_method == precipitation.proton_method
-                and np.isclose(
-                    conductance.proton_energy,
-                    precipitation.proton_energy,
-                )
-                and np.isclose(
-                    conductance.proton_energy_uncertainty,
-                    precipitation.proton_energy_uncertainty,
-                )
+                and conductance.proton_flux_source == precipitation.proton_flux_source
+                and conductance.proton_energy_model == precipitation.proton_energy_model
             )
+            if not matches:
+                return False
+            if precipitation.proton_energy_model == "constant":
+                return (
+                    np.isclose(
+                        conductance.proton_energy_constant,
+                        precipitation.proton_energy_constant,
+                    )
+                    and np.isclose(
+                        conductance.proton_energy_uncertainty_constant,
+                        precipitation.proton_energy_uncertainty_constant,
+                    )
+                )
+            return True
     except (OSError, RuntimeError, KeyError, AttributeError, ValueError):
         return False
 

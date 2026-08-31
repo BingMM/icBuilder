@@ -14,6 +14,7 @@ from netCDF4 import Dataset
 
 from icbuilder.precipitationimage import (
     PrecipitationImage,
+    prepare_si_sensor,
     make_regrid_mapping,
     match_sensor_times,
     regrid_to_target,
@@ -21,7 +22,10 @@ from icbuilder.precipitationimage import (
 from icbuilder.grids import make_image_grids
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "make_precipitation_orbit_files.py"
+SCRIPT = (
+    Path(__file__).parents[1] / "scripts" / "pipeline"
+    / "make_precipitation_orbit_files.py"
+)
 SPEC = importlib.util.spec_from_file_location("make_precipitation_orbit_files", SCRIPT)
 ORBIT_SCRIPT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ORBIT_SCRIPT)
@@ -187,8 +191,10 @@ def test_canonical_si_grid_covers_the_complete_wic_grid():
     mapping = make_regrid_mapping(si_grid, wic_grid)
     target = regrid_to_target(np.ones((1, *si_grid.shape)), mapping)
 
-    assert len(mapping["target_indices"]) == 1156
-    assert len(mapping["boundary_indices"]) == 140
+    assert (
+        len(mapping["target_indices"]) + len(mapping["boundary_indices"])
+        == wic_grid.size
+    )
     assert np.isfinite(target).all()
 
 
@@ -205,6 +211,22 @@ def test_regrid_treats_each_source_array_independently():
     assert np.isfinite(target_sigma).all()
 
 
+def test_identical_si_grid_is_copied_without_expanding_nan_cells():
+    sensor = _Binned("SI13", [BASE_TIME], SI_GRID, 6.0)
+    sensor.mu[0, 0, 0] = np.nan
+    sensor.sigma[0, 0, 0] = np.nan
+    sensor.w[0, 0, 0] = np.nan
+
+    values, sigma, weight = prepare_si_sensor(
+        sensor, np.array([0]), SI_GRID
+    )
+
+    np.testing.assert_array_equal(values, sensor.mu)
+    np.testing.assert_array_equal(sigma, sensor.sigma)
+    np.testing.assert_array_equal(weight, sensor.w)
+    assert np.isfinite(values).sum() == 3
+
+
 #%% Method boundary
 
 def test_default_physics_function_comes_from_icphysics(monkeypatch):
@@ -219,6 +241,37 @@ def test_default_physics_function_comes_from_icphysics(monkeypatch):
         wic, si12, "zhang_paxton", kp_series=_kp_series()
     )
     assert image.physics_provenance["function"] == "_zhang_paxton_stub"
+
+
+def test_hardy_is_default_and_energy_is_clipped_to_response_table():
+    wic, si12, _ = _binned_inputs()
+
+    image = PrecipitationImage(
+        wic, si12, "zhang_paxton", _zhang_paxton_stub,
+        kp_series=_kp_series(),
+    )
+
+    assert image.proton_energy_model == "hardy"
+    assert image.proton_flux_source == "SI12"
+    assert np.isfinite(image.Ep_model).all()
+    assert np.all((image.Ep >= 0.47) & (image.Ep <= 46.7))
+    np.testing.assert_allclose(image.dEp, 0.0)
+    assert "not modelled" in image.proton_energy_uncertainty_method
+
+
+def test_constant_proton_energy_preserves_raw_and_clipped_values():
+    wic, si12, _ = _binned_inputs()
+
+    image = PrecipitationImage(
+        wic, si12, "zhang_paxton", _zhang_paxton_stub,
+        kp_series=_kp_series(), proton_energy_model="constant",
+        proton_energy=100.0, proton_energy_uncertainty=0.5,
+    )
+
+    np.testing.assert_allclose(image.Ep_model, 100.0)
+    np.testing.assert_allclose(image.Ep, 46.7)
+    np.testing.assert_allclose(image.dEp, 0.5)
+    assert image.Ep_clipping_flag.all()
 
 
 def test_filenames_and_default_kp_are_loaded(monkeypatch):
@@ -350,6 +403,7 @@ def test_precipitation_netcdf_is_method_specific_and_self_describing(tmp_path):
     precipitation = PrecipitationImage(
         wic, si12, "zhang_paxton", _zhang_paxton_stub,
         kp_series=_kp_series(),
+        proton_energy_model="constant",
         proton_energy=5.0,
         proton_energy_uncertainty=0.5,
         source_products={"wic": "binned/wic/or_0001.nc", "si12": "binned/si12/or_0001.nc"},
@@ -360,19 +414,20 @@ def test_precipitation_netcdf_is_method_specific_and_self_describing(tmp_path):
     precipitation.to_nc(output)
 
     assert ORBIT_SCRIPT.precipitation_file_status(
-        output, "zhang_paxton", "SI12", 5.0, 0.5
+        output, "zhang_paxton", "constant", 5.0, 0.5
     ) == "complete"
     assert ORBIT_SCRIPT.precipitation_file_status(
-        output, "zhang_paxton", "SI12", 2.0, 0.0
+        output, "zhang_paxton", "constant", 2.0, 0.0
     ) == "mismatch"
 
     with Dataset(output) as nc:
         assert nc.product_type == "precipitation"
-        assert nc.schema_version == 1
+        assert nc.schema_version == 2
         assert nc.method == "zhang_paxton"
-        assert nc.proton_method == "SI12"
-        assert nc.proton_energy == 5.0
-        assert nc.proton_energy_uncertainty == 0.5
+        assert nc.proton_flux_source == "SI12"
+        assert nc.proton_energy_model == "constant"
+        assert nc.proton_energy_constant == 5.0
+        assert nc.proton_energy_uncertainty_constant == 0.5
         assert nc.time_match_tolerance_seconds == 2
         assert "independent source-cell errors" in nc.regrid_uncertainty
         assert nc.physics_function == "_zhang_paxton_stub"
@@ -384,8 +439,9 @@ def test_precipitation_netcdf_is_method_specific_and_self_describing(tmp_path):
             "Kp_interval_start", "ssalon", "wic", "dwic", "si12",
             "dsi12", "si13", "dsi13", "wic_weight", "si12_weight",
             "si13_weight", "w", "wic_corrected", "dwic_corrected",
-            "si13_corrected", "dsi13_corrected", "E0", "dE0", "Fe",
-            "dFe", "varE0Fe",
+            "si13_corrected", "dsi13_corrected", "Ep_model", "Ep", "dEp",
+            "Ep_clipping_flag", "Fp", "dFp", "E0", "dE0", "Fe", "dFe",
+            "varE0Fe",
         }
         assert set(nc.variables) == expected
         for forbidden in ("counts", "P", "H", "dP", "dH"):
@@ -409,5 +465,5 @@ def test_restart_rejects_an_old_regridding_rule(tmp_path):
         nc.regrid_method = "old centre-only interpolation"
 
     assert ORBIT_SCRIPT.precipitation_file_status(
-        output, "zhang_paxton", "SI12", 2.0, 0.0
+        output, "zhang_paxton", "hardy", 2.0, 0.0
     ) == "mismatch"

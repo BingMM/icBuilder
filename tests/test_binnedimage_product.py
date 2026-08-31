@@ -13,13 +13,14 @@ from icbuilder.binnedimage import BinnedImage
 from icbuilder.preimage import PreImage
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "make_binned_orbit_files.py"
+SCRIPT = Path(__file__).parents[1] / "scripts" / "pipeline" / "make_binned_orbit_files.py"
 SPEC = importlib.util.spec_from_file_location("make_binned_orbit_files", SCRIPT)
 ORBIT_SCRIPT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ORBIT_SCRIPT)
 
 PRECIPITATION_SCRIPT = (
-    Path(__file__).parents[1] / "scripts" / "make_precipitation_orbit_files.py"
+    Path(__file__).parents[1] / "scripts" / "pipeline"
+    / "make_precipitation_orbit_files.py"
 )
 PRECIPITATION_SPEC = importlib.util.spec_from_file_location(
     "make_precipitation_orbit_files", PRECIPITATION_SCRIPT
@@ -121,7 +122,7 @@ def test_binnedimage_product_round_trip_schema(tmp_path):
     time = datetime(2001, 2, 3, 4, 5, 6)
     binned = BinnedImage(
         _PreImage(), _OneCellGrid(), [time], correction="SH",
-        los_correction=False,
+        los_correction=False, binning_method="centre",
     )
     output = tmp_path / "wic.nc"
     binned.to_nc(output)
@@ -132,9 +133,10 @@ def test_binnedimage_product_round_trip_schema(tmp_path):
         assert nc.sensor == "WIC"
         assert nc.image_correction == "SH"
         assert nc.los_correction == 0
+        assert nc.binning_method == "centre"
         assert set(nc.variables) == {
             "counts", "mu", "sigma", "w", "sza", "dza", "los_factor",
-            "time", "ssalon",
+            "coverage", "time", "ssalon",
         }
         assert "Kp" not in nc.variables
         for name in ("E0", "Fe", "P", "H", "Ep", "dEp"):
@@ -146,6 +148,7 @@ def test_binnedimage_product_round_trip_schema(tmp_path):
         np.testing.assert_allclose(nc.variables["mu"][:], binned.mu)
         np.testing.assert_allclose(nc.variables["sigma"][:], binned.sigma)
         np.testing.assert_allclose(nc.variables["w"][:], binned.w)
+        assert np.all(np.isnan(nc.variables["coverage"][:]))
         np.testing.assert_allclose(nc.variables["ssalon"][:], binned.ssalon)
 
         time_variable = nc.variables["time"]
@@ -174,14 +177,17 @@ def test_binnedimage_product_round_trip_schema(tmp_path):
         assert grid.variables["mlt"].units == "hours"
 
     assert binned.counts.dtype == np.int32
-    for name in ("counts", "mu", "sigma", "w", "sza", "dza", "los_factor"):
+    for name in (
+        "counts", "mu", "sigma", "w", "sza", "dza", "los_factor",
+        "coverage",
+    ):
         assert getattr(binned, name).shape == binned.shape
 
 
 def test_atomic_save_publishes_a_complete_product(tmp_path):
     binned = BinnedImage(
         _PreImage(), _OneCellGrid(), [datetime(2001, 1, 1)],
-        correction="SH", los_correction=False,
+        correction="SH", los_correction=False, binning_method="centre",
     )
     output = tmp_path / "or_0001.nc"
 
@@ -191,10 +197,10 @@ def test_atomic_save_publishes_a_complete_product(tmp_path):
         assert nc.product_type == "binned_fuv"
         assert nc.sensor == "WIC"
     assert ORBIT_SCRIPT.binned_file_status(
-        output, "WIC", "SH", False
+        output, "WIC", "SH", False, "centre"
     ) == "complete"
     assert ORBIT_SCRIPT.binned_file_status(
-        output, "WIC", "DG", False
+        output, "WIC", "DG", False, "centre"
     ) == "mismatch"
     assert not Path(str(output) + ".partial").exists()
 
@@ -219,16 +225,22 @@ def test_precipitation_script_defaults_follow_the_product_layout():
     assert args.precipitation_method == "zhang_paxton"
 
 
+def test_binned_script_defaults_to_footprint_binning():
+    args = ORBIT_SCRIPT.parse_args([])
+
+    assert args.binning_method == "footprint"
+
+
 def test_precipitation_script_exposes_proton_configuration():
     args = PRECIPITATION_ORBIT_SCRIPT.parse_args([
         "--precipitation-method", "image_ratio",
-        "--proton-method", "SI12",
+        "--proton-energy-model", "constant",
         "--proton-energy", "5",
         "--proton-energy-uncertainty", "0.5",
     ])
 
     assert args.precipitation_method == "image_ratio"
-    assert args.proton_method == "SI12"
+    assert args.proton_energy_model == "constant"
     assert args.proton_energy == 5.0
     assert args.proton_energy_uncertainty == 0.5
 

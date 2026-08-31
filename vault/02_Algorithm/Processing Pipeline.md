@@ -1,10 +1,34 @@
 # Processing Pipeline
 
-Last reviewed: 2026-08-05
+Last reviewed: 2026-08-14
 
 This note records the durable high-level workflow visible in the README and
 live code. It is orientation, not a claim that the full production dataset was
 reproduced during the review.
+
+## Modular Product-1 binning
+
+`scripts/make_binned_orbit_files.py` defaults to
+`--binning-method footprint`. For each frame, `BinnedImage` projects the
+geolocated detector-pixel centres into the target CS plane, infers a local
+four-corner footprint from row and column neighbour spacing, and clips that
+uniform top-hat footprint against every intersected target cell. A sparse
+overlap matrix is then reused for signal, weight, SZA, DZA, and LOS geometry.
+
+The stored signal is an overlap-area-weighted mean. `counts` is the integer
+number of valid source footprints intersecting a cell, while `coverage` is the
+fraction of target-cell area covered by valid footprints. These are separate:
+a footprint can observe a cell even when its centre lies elsewhere.
+
+`sigma` is deliberately provisional. It is the overlap-weighted within-cell
+spread followed, when requested, by the existing count-based small-sample
+inflation. It is not yet a propagated detector measurement uncertainty.
+
+The previous centre-assignment median calculation remains available through
+`--binning-method centre`. The chosen method is saved in each Product-1 file
+and included in restart validation, making rollback possible without mixing
+incompatible files. Common WIC/SI resolution matching is not part of Product
+1 and remains a Product-2 task.
 
 ## Primary orbit workflow
 
@@ -37,7 +61,7 @@ reproduced during the review.
    interpreted as UTC. `ConductanceImage` independently checks that each frame
    lies in the half-open interval stored with it.
 
-   The current uncommitted `BinnedImage` path can apply the provisional
+   `BinnedImage` can apply the provisional
    pixel-level `cos(DZA)` normalization before calculating image statistics.
    Each binned sensor image retains median SZA, median DZA, median
    `cos(DZA)`, and whether the correction was selected. The geometry uses the
@@ -45,7 +69,9 @@ reproduced during the review.
    target-grid interpolation and later frame selection. Median
    `cos(DZA)` is diagnostic: because correction precedes the image median, it
    is not generally an exact multiplier between corrected and uncorrected
-   binned brightness.
+   binned brightness. The modular Product-1 orbit builder explicitly selects
+   `los_correction=False`. Independently, the upstream fuvpy read retains only
+   source pixels with `DZA < 75` degrees.
 
    Binning calculates one flattened cell number per source pixel, stably
    groups the populated cells, and then calculates each cell's statistics in
@@ -75,14 +101,22 @@ reproduced during the review.
    output file itself is the completion record, so there is no separate ledger
    that can disagree with the data.
 
-   The combined sensor weight and the six camera proton-response quantities
-   that depend only on orbit-wide Ep/dEp are evaluated once. The production
-   Zhang--Paxton branch then evaluates all supported cells with masked float64
-   arrays. Cells missing any count or count uncertainty retain the same NaN
-   support as the scalar calculation. The zero-flux Robinson uncertainty is
-   evaluated on a separate mask, so the singular nonzero-flux derivative is
-   never evaluated at Fe=0. The old `image_ratio` branch deliberately remains
-   a scalar comparison path with the same cached proton response.
+   Product 2 uses SI12 as the event-specific proton-flux source. Proton mean
+   energy now defaults to the spatial Hardy et al. (1991) model, evaluated once
+   for each distinct Kp value on the Product-2 MLT/MLAT grid. `Ep_model`
+   preserves the raw Hardy result; `Ep` is clipped to the 0.47--46.7 keV domain
+   tabulated for the Frey camera responses, and `Ep_clipping_flag` records the
+   affected cells. The file also stores dEp, Fp, dFp, the energy model, the
+   flux source, the Modified-Apex coordinate approximation, and the fact that
+   Hardy supplies no formal dEp. A constant-Ep comparison path remains.
+
+   Product 3 carries these proton fields and provenance without recalculating
+   them. The production Zhang--Paxton branch then evaluates all supported cells
+   with masked float64 arrays. Cells missing any count or count uncertainty
+   retain the same NaN support as the scalar calculation. The zero-flux
+   Robinson uncertainty is evaluated on a separate mask, so the singular
+   nonzero-flux derivative is never evaluated at Fe=0. The old `image_ratio`
+   branch deliberately remains a scalar comparison path.
 
 ## Secondary spline workflow
 

@@ -37,11 +37,21 @@ class ConductanceImage:
             conductance_function = robinson_conductance
 
         self.product_type = "conductance"
-        self.schema_version = 1
+        self.schema_version = 2
         self.precipitation_method = precipitation.method
-        self.proton_method = precipitation.proton_method
-        self.proton_energy = float(precipitation.proton_energy)
-        self.proton_energy_uncertainty = float(precipitation.proton_energy_uncertainty)
+        self.proton_flux_source = precipitation.proton_flux_source
+        self.proton_energy_model = precipitation.proton_energy_model
+        self.proton_energy_uncertainty_method = (
+            precipitation.proton_energy_uncertainty_method
+        )
+        self.proton_energy_coordinate_note = precipitation.proton_energy_coordinate_note
+        self.proton_response_energy_min = precipitation.proton_response_energy_min
+        self.proton_response_energy_max = precipitation.proton_response_energy_max
+        if self.proton_energy_model == "constant":
+            self.proton_energy_constant = precipitation.proton_energy_constant
+            self.proton_energy_uncertainty_constant = (
+                precipitation.proton_energy_uncertainty_constant
+            )
         self.conductance_model = conductance_model
         self.source_precipitation = source_file
 
@@ -57,11 +67,20 @@ class ConductanceImage:
         self.precipitation_provenance = dict(precipitation.physics_provenance)
 
         # Product 3 carries the precipitation state and its existing weight.
-        for name in ("E0", "dE0", "Fe", "dFe", "varE0Fe", "w"):
+        for name in (
+            "Ep_model", "Ep", "dEp", "Fp", "dFp",
+            "E0", "dE0", "Fe", "dFe", "varE0Fe", "w",
+        ):
             values = np.asarray(getattr(precipitation, name), dtype=float)
             if values.shape != self.shape:
                 raise ValueError(f"{name} must have shape {self.shape}")
             setattr(self, name, values.copy())
+
+        self.Ep_clipping_flag = np.asarray(
+            precipitation.Ep_clipping_flag, dtype=bool
+        ).copy()
+        if self.Ep_clipping_flag.shape != self.shape:
+            raise ValueError(f"Ep_clipping_flag must have shape {self.shape}")
 
         result = conductance_function(self.E0, self.Fe, self.dE0, self.dFe, self.varE0Fe)
         if not isinstance(result, dict):
@@ -93,9 +112,17 @@ class ConductanceImage:
             nc.product_type = self.product_type
             nc.schema_version = self.schema_version
             nc.precipitation_method = self.precipitation_method
-            nc.proton_method = self.proton_method
-            nc.proton_energy = self.proton_energy
-            nc.proton_energy_uncertainty = self.proton_energy_uncertainty
+            nc.proton_flux_source = self.proton_flux_source
+            nc.proton_energy_model = self.proton_energy_model
+            nc.proton_energy_uncertainty_method = self.proton_energy_uncertainty_method
+            nc.proton_energy_coordinate_note = self.proton_energy_coordinate_note
+            nc.proton_response_energy_min = self.proton_response_energy_min
+            nc.proton_response_energy_max = self.proton_response_energy_max
+            if self.proton_energy_model == "constant":
+                nc.proton_energy_constant = self.proton_energy_constant
+                nc.proton_energy_uncertainty_constant = (
+                    self.proton_energy_uncertainty_constant
+                )
             nc.conductance_model = self.conductance_model
             if self.source_precipitation is not None:
                 nc.source_precipitation = self.source_precipitation
@@ -128,7 +155,12 @@ class ConductanceImage:
             ssalon[:] = self.ssalon
             ssalon.units = "degrees"
 
-            fields = {"E0": (self.E0, "keV"),
+            fields = {"Ep_model": (self.Ep_model, "keV"),
+                      "Ep": (self.Ep, "keV"),
+                      "dEp": (self.dEp, "keV"),
+                      "Fp": (self.Fp, "mW m-2"),
+                      "dFp": (self.dFp, "mW m-2"),
+                      "E0": (self.E0, "keV"),
                       "dE0": (self.dE0, "keV"),
                       "Fe": (self.Fe, "mW m-2"),
                       "dFe": (self.dFe, "mW m-2"),
@@ -143,6 +175,12 @@ class ConductanceImage:
                 variable = nc.createVariable(name, "f4", ("time", "dim1", "dim2"), zlib=True)
                 variable[:] = data
                 variable.units = units
+
+            clipped = nc.createVariable(
+                "Ep_clipping_flag", "i1", ("time", "dim1", "dim2"), zlib=True
+            )
+            clipped[:] = self.Ep_clipping_flag.astype(np.int8)
+            clipped.long_name = "proton energy clipped to camera-response table range"
 
             grid = nc.createGroup("grid")
             grid.position = self.grid.projection.position.astype(float)

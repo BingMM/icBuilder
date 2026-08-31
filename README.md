@@ -23,6 +23,7 @@ For repository-specific operating guidance and technical continuity, start with
 - [`secsy`](https://github.com/klaundal/secsy) - for cubed sphere grid generation
 - `ZhangPaxton2008` - for generating the bundled electron-energy lookup
 - `netCDF4` - for lookup and conductance-product serialization
+- `numba` - for compiled detector-footprint overlap calculations
 - [`tqdm`](https://github.com/tqdm/tqdm) – for progress bars (optional; can be removed with minor edits)
 - [`icReader`](https://github.com/BingMM/icReader) - for reading conductance output files (optional; used for creating conductance figures)
 
@@ -108,13 +109,19 @@ count. When coarse SI fields are interpolated to the WIC grid, fields share a
 triangulation only when their non-NaN source cells are identical; fields with
 different missing-data patterns retain their own valid source cells.
 
-`ConductanceImage` evaluates the orbit-wide proton response and combined
-sensor weight once. The production Zhang--Paxton path then applies the count,
-flux, covariance, and Robinson equations to all supported cells as float64
-arrays. Separate zero- and nonzero-flux masks preserve the one-sided
+The modular Product-2 builder uses SI12 for the event-specific proton flux and
+Hardy et al. (1991) for proton mean energy by default. Hardy is evaluated once
+per distinct Kp value on the Product-2 MLT/MLAT grid. The raw model energy is
+saved as `Ep_model`; `Ep` is the value clipped to the 0.47--46.7 keV range of
+the Frey camera-response tables, and `Ep_clipping_flag` records every changed
+cell. `Fp`, `dFp`, and the unmodelled status of Hardy energy uncertainty are
+also preserved through Product 3. A fixed-energy comparison remains available
+with `--proton-energy-model constant`.
+
+Separate zero- and nonzero-flux masks preserve the one-sided conductance
 uncertainty definition without evaluating the singular derivative at zero.
 The historical `image_ratio` comparison remains scalar because its piecewise
-low-signal rules are not used by the production path.
+low-signal rules are not used by the Zhang--Paxton path.
 
 Input and output folder names default to `wic`, `s12`, `s13`, and
 `conductance` under `--base`, but can be changed independently. For example,

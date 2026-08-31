@@ -10,6 +10,8 @@ import numpy as np
 from icreader import load as icload
 from netCDF4 import Dataset, date2num
 from icphysics import (
+    PROTON_RESPONSE_ENERGY_RANGE,
+    hardy_ion_precipitation,
     precipitation_from_ratio,
     precipitation_from_zhang_paxton,
     proton_correct_images,
@@ -323,6 +325,63 @@ def prepare_observations(time, source_indices, wic, si12, si13, target_grid):
     return prepared
 
 
+#%% Proton energy
+
+PROTON_ENERGY_MODELS = ("hardy", "constant")
+PROTON_FLUX_SOURCE = "SI12"
+HARDY_COORDINATE_NOTE = (
+    "Hardy corrected geomagnetic coordinates approximated by the Product-2 "
+    "Modified Apex grid at 130 km"
+)
+
+
+def make_proton_energy(kp, grid, shape, model, constant_energy, constant_uncertainty):
+    """Return raw and response-clipped proton mean energy on the image grid."""
+
+    if model not in PROTON_ENERGY_MODELS:
+        raise ValueError(f"proton_energy_model must be one of {PROTON_ENERGY_MODELS}")
+    if constant_uncertainty < 0:
+        raise ValueError("proton_energy_uncertainty must not be negative")
+
+    if model == "constant":
+        if not np.isfinite(constant_energy) or constant_energy <= 0:
+            raise ValueError("proton_energy must be a positive finite value")
+        Ep_model = np.full(shape, constant_energy, dtype=float)
+        dEp = np.full(shape, constant_uncertainty, dtype=float)
+        uncertainty_method = "constant supplied value"
+        coordinate_note = "not applicable to constant proton energy"
+    else:
+        Ep_model = np.full(shape, np.nan)
+        mlt = grid_mlt(grid)
+        mlat = np.asarray(grid.lat, dtype=float)
+
+        # Kp is constant over each three-hour GFZ interval. Evaluate each
+        # distinct Hardy map once, then copy it into the matching frames.
+        for kp_value in np.unique(kp[np.isfinite(kp)]):
+            frames = kp == kp_value
+            hardy = hardy_ion_precipitation(kp_value, mlt, mlat)
+            Ep_model[frames] = hardy["mean_energy"]
+
+        # Hardy supplies no predictive uncertainty for mean proton energy.
+        # Zero here means "not modelled", not known without uncertainty.
+        dEp = np.where(np.isfinite(Ep_model), 0.0, np.nan)
+        uncertainty_method = "not modelled by Hardy et al. (1991)"
+        coordinate_note = HARDY_COORDINATE_NOTE
+
+    lower, upper = PROTON_RESPONSE_ENERGY_RANGE
+    Ep = np.clip(Ep_model, lower, upper)
+    Ep_clipping_flag = np.isfinite(Ep_model) & (Ep != Ep_model)
+
+    return {
+        "Ep_model": Ep_model,
+        "Ep": Ep,
+        "dEp": dEp,
+        "Ep_clipping_flag": Ep_clipping_flag,
+        "uncertainty_method": uncertainty_method,
+        "coordinate_note": coordinate_note,
+    }
+
+
 #%% Precipitation product
 
 class PrecipitationImage:
@@ -337,16 +396,17 @@ class PrecipitationImage:
         *,
         si13=None,
         kp_series=None,
+        proton_energy_model="hardy",
         proton_energy=2.0,
         proton_energy_uncertainty=0.0,
-        proton_method="SI12",
+        proton_flux_source=PROTON_FLUX_SOURCE,
         source_products=None,
         physics_provenance=None):
         
         if method not in ("image_ratio", "zhang_paxton"):
             raise ValueError("method must be 'image_ratio' or 'zhang_paxton'")
-        if proton_method != "SI12":
-            raise ValueError("proton_method must currently be 'SI12'")
+        if proton_flux_source != PROTON_FLUX_SOURCE:
+            raise ValueError("proton_flux_source must currently be 'SI12'")
         if physics_function is None:
             physics_function = {
                 "image_ratio": precipitation_from_ratio,
@@ -374,9 +434,10 @@ class PrecipitationImage:
 
         self.method = method
         self.grid = deepcopy(wic.grid)
-        self.proton_energy = float(proton_energy)
-        self.proton_energy_uncertainty = float(proton_energy_uncertainty)
-        self.proton_method = str(proton_method)
+        self.proton_flux_source = str(proton_flux_source)
+        self.proton_energy_model = str(proton_energy_model)
+        self.proton_energy_constant = float(proton_energy)
+        self.proton_energy_uncertainty_constant = float(proton_energy_uncertainty)
         self.source_products = input_files
         self.source_products.update(source_products or {})
 
@@ -413,11 +474,28 @@ class PrecipitationImage:
         self.kp_interval_start = matched_kp["interval_start"]
         self.kp_provenance = dict(kp_series["provenance"])
 
+        proton_energy_fields = make_proton_energy(
+            self.kp,
+            self.grid,
+            self.shape,
+            self.proton_energy_model,
+            self.proton_energy_constant,
+            self.proton_energy_uncertainty_constant,
+        )
+        self.proton_energy_uncertainty_method = proton_energy_fields.pop(
+            "uncertainty_method"
+        )
+        self.proton_energy_coordinate_note = proton_energy_fields.pop(
+            "coordinate_note"
+        )
+        for name, values in proton_energy_fields.items():
+            setattr(self, name, np.asarray(values).copy())
+
         corrected = proton_correct_images(wic=self.wic, dwic=self.dwic,
                                           si12=self.si12, dsi12=self.dsi12,
                                           si13=self.si13, dsi13=self.dsi13,
-                                          proton_energy=self.proton_energy,
-                                          proton_energy_uncertainty=self.proton_energy_uncertainty)
+                                          proton_energy=self.Ep,
+                                          proton_energy_uncertainty=self.dEp)
         
         for name, values in corrected.items():
             setattr(self, name, np.asarray(values, dtype=float).copy())
@@ -471,11 +549,17 @@ class PrecipitationImage:
             nc.createDimension("dim2", self.shape[2])
 
             nc.product_type = "precipitation"
-            nc.schema_version = 1
+            nc.schema_version = 2
             nc.method = self.method
-            nc.proton_method = self.proton_method
-            nc.proton_energy = self.proton_energy
-            nc.proton_energy_uncertainty = self.proton_energy_uncertainty
+            nc.proton_flux_source = self.proton_flux_source
+            nc.proton_energy_model = self.proton_energy_model
+            nc.proton_energy_uncertainty_method = self.proton_energy_uncertainty_method
+            nc.proton_energy_coordinate_note = self.proton_energy_coordinate_note
+            nc.proton_response_energy_min = PROTON_RESPONSE_ENERGY_RANGE[0]
+            nc.proton_response_energy_max = PROTON_RESPONSE_ENERGY_RANGE[1]
+            if self.proton_energy_model == "constant":
+                nc.proton_energy_constant = self.proton_energy_constant
+                nc.proton_energy_uncertainty_constant = self.proton_energy_uncertainty_constant
             nc.time_match_tolerance_seconds = TIME_TOLERANCE.total_seconds()
             nc.time_match_rule = TIME_MATCH_RULE
             nc.regrid_method = REGRID_METHOD
@@ -534,6 +618,11 @@ class PrecipitationImage:
                 "dwic_corrected": (self.dwic_corrected, "counts"),
                 "si13_corrected": (self.si13_corrected, "counts"),
                 "dsi13_corrected": (self.dsi13_corrected, "counts"),
+                "Ep_model": (self.Ep_model, "keV"),
+                "Ep": (self.Ep, "keV"),
+                "dEp": (self.dEp, "keV"),
+                "Fp": (self.Fp, "mW m-2"),
+                "dFp": (self.dFp, "mW m-2"),
                 "E0": (self.E0, "keV"),
                 "dE0": (self.dE0, "keV"),
                 "Fe": (self.Fe, "mW m-2"),
@@ -550,6 +639,12 @@ class PrecipitationImage:
                 )
                 variable[:] = data
                 variable.units = units
+
+            clipped = nc.createVariable(
+                "Ep_clipping_flag", "i1", ("time", "dim1", "dim2"), zlib=True
+            )
+            clipped[:] = self.Ep_clipping_flag.astype(np.int8)
+            clipped.long_name = "proton energy clipped to camera-response table range"
 
             grid = nc.createGroup("grid")
             grid.position = self.grid.projection.position.astype(float)

@@ -21,7 +21,8 @@ PRECIPITATION_FIELDS = (
     "wic", "dwic", "si12", "dsi12", "si13", "dsi13",
     "wic_weight", "si12_weight", "si13_weight", "w",
     "wic_corrected", "dwic_corrected", "si13_corrected",
-    "dsi13_corrected", "E0", "dE0", "Fe", "dFe", "varE0Fe",
+    "dsi13_corrected", "Ep_model", "Ep", "dEp", "Ep_clipping_flag",
+    "Fp", "dFp", "E0", "dE0", "Fe", "dFe", "varE0Fe",
 )
 
 def save_precipitation_file(precipitation, filename):
@@ -35,9 +36,9 @@ def save_precipitation_file(precipitation, filename):
         status = precipitation_file_status(
             partial_file,
             precipitation.method,
-            precipitation.proton_method,
-            precipitation.proton_energy,
-            precipitation.proton_energy_uncertainty,
+            precipitation.proton_energy_model,
+            precipitation.proton_energy_constant,
+            precipitation.proton_energy_uncertainty_constant,
         )
         if status != "complete":
             raise RuntimeError(f"incomplete precipitation file: {partial_file}")
@@ -50,7 +51,7 @@ def save_precipitation_file(precipitation, filename):
 def precipitation_file_status(
     filename,
     method,
-    proton_method,
+    proton_energy_model,
     proton_energy,
     proton_energy_uncertainty,
 ):
@@ -62,18 +63,22 @@ def precipitation_file_status(
 
     try:
         with Dataset(filename) as nc:
-            if nc.product_type != "precipitation" or int(nc.schema_version) != 1:
+            if nc.product_type != "precipitation" or int(nc.schema_version) != 2:
                 return "invalid"
             if (
                 nc.method != method
-                or nc.proton_method != proton_method
-                or not np.isclose(nc.proton_energy, proton_energy)
-                or not np.isclose(
-                    nc.proton_energy_uncertainty,
-                    proton_energy_uncertainty,
-                )
+                or nc.proton_flux_source != "SI12"
+                or nc.proton_energy_model != proton_energy_model
                 or nc.regrid_method != REGRID_METHOD
                 or nc.regrid_uncertainty != REGRID_UNCERTAINTY
+            ):
+                return "mismatch"
+            if proton_energy_model == "constant" and (
+                not np.isclose(nc.proton_energy_constant, proton_energy)
+                or not np.isclose(
+                    nc.proton_energy_uncertainty_constant,
+                    proton_energy_uncertainty,
+                )
             ):
                 return "mismatch"
 
@@ -113,7 +118,7 @@ def process_orbit(
     output_dir,
     kp_series,
     method,
-    proton_method,
+    proton_energy_model,
     proton_energy,
     proton_energy_uncertainty,
 ):
@@ -134,7 +139,7 @@ def process_orbit(
         si13=si13_file,
         method=method,
         kp_series=kp_series,
-        proton_method=proton_method,
+        proton_energy_model=proton_energy_model,
         proton_energy=proton_energy,
         proton_energy_uncertainty=proton_energy_uncertainty,
     )
@@ -182,16 +187,18 @@ def parse_args(argv=None):
         default="zhang_paxton",
     )
     parser.add_argument(
-        "--proton-method", choices=("SI12",), default="SI12",
-        help="proton-correction method (currently SI12)",
+        "--proton-energy-model",
+        choices=("hardy", "constant"),
+        default="hardy",
+        help="proton mean-energy model (default: hardy)",
     )
     parser.add_argument(
         "--proton-energy", type=float, default=2.0,
-        help="assumed proton characteristic energy Ep in keV (default: 2)",
+        help="constant proton mean energy in keV; used only with --proton-energy-model constant",
     )
     parser.add_argument(
         "--proton-energy-uncertainty", type=float, default=0.0,
-        help="uncertainty dEp in keV (default: 0)",
+        help="constant dEp in keV; used only with --proton-energy-model constant",
     )
     return parser.parse_args(argv)
 
@@ -209,11 +216,13 @@ def main(argv=None):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Precipitation method: {args.precipitation_method}")
-    print(
-        f"Proton correction: {args.proton_method}, "
-        f"Ep = {args.proton_energy:g} keV, "
-        f"dEp = {args.proton_energy_uncertainty:g} keV"
-    )
+    print("Proton flux source: SI12")
+    print(f"Proton energy model: {args.proton_energy_model}")
+    if args.proton_energy_model == "constant":
+        print(
+            f"Constant Ep = {args.proton_energy:g} keV, "
+            f"dEp = {args.proton_energy_uncertainty:g} keV"
+        )
     print(f"Output: {output_dir}\n")
 
     # Zhang-Paxton needs WIC and SI12. The image-ratio method also needs SI13.
@@ -231,7 +240,7 @@ def main(argv=None):
         status = precipitation_file_status(
             filename,
             args.precipitation_method,
-            args.proton_method,
+            args.proton_energy_model,
             args.proton_energy,
             args.proton_energy_uncertainty,
         )
@@ -260,7 +269,7 @@ def main(argv=None):
         output_dir=output_dir,
         kp_series=kp_series,
         method=args.precipitation_method,
-        proton_method=args.proton_method,
+        proton_energy_model=args.proton_energy_model,
         proton_energy=args.proton_energy,
         proton_energy_uncertainty=args.proton_energy_uncertainty,
     )

@@ -116,7 +116,8 @@ def plot_frame(image, frame, fields):
         f"Time: {image.time[frame]}\n"
         f"Kp: {image.kp[frame]:.3g}\n"
         f"Precipitation: {method}\n"
-        f"Proton correction: {image.proton_method}\n"
+        f"Proton flux: {image.proton_flux_source}\n"
+        f"Proton energy: {image.proton_energy_model}\n"
         f"Conductance: {image.conductance_model}"
     )
     axes[-1].text(0.05, 0.9, metadata, va="top", fontsize=14)

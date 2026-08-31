@@ -25,9 +25,12 @@ class _Grid:
 class _Precipitation:
     product_type = "precipitation"
     method = "zhang_paxton"
-    proton_method = "SI12"
-    proton_energy = 2.0
-    proton_energy_uncertainty = 0.1
+    proton_flux_source = "SI12"
+    proton_energy_model = "hardy"
+    proton_energy_uncertainty_method = "not modelled by Hardy et al. (1991)"
+    proton_energy_coordinate_note = "test coordinates"
+    proton_response_energy_min = 0.47
+    proton_response_energy_max = 46.7
     time = np.array([datetime(2000, 1, 1, 1)], dtype=object)
     ssalon = np.array([15.0])
     grid = _Grid()
@@ -36,6 +39,12 @@ class _Precipitation:
     kp_interval_start = np.array(["2000-01-01T00:00:00"], dtype="datetime64[s]")
     kp_provenance = {"source": "test"}
     physics_provenance = {"function": "precipitation_from_zhang_paxton"}
+    Ep_model = np.full(shape, 0.3)
+    Ep = np.full(shape, 0.47)
+    dEp = np.zeros(shape)
+    Ep_clipping_flag = np.ones(shape, dtype=bool)
+    Fp = np.full(shape, 0.8)
+    dFp = np.full(shape, 0.1)
     E0 = np.full(shape, 2.5)
     dE0 = np.full(shape, 0.4)
     Fe = np.full(shape, 3.0)
@@ -48,8 +57,9 @@ def test_conductance_preserves_precipitation_choices_and_weight(tmp_path):
     conductance = ConductanceImage(_Precipitation())
 
     assert conductance.precipitation_method == "zhang_paxton"
-    assert conductance.proton_method == "SI12"
-    assert conductance.proton_energy == 2.0
+    assert conductance.proton_flux_source == "SI12"
+    assert conductance.proton_energy_model == "hardy"
+    assert conductance.Ep_clipping_flag.all()
     np.testing.assert_allclose(conductance.w, 0.7)
     np.testing.assert_allclose(conductance.ssalon, 15.0)
     assert np.isfinite(conductance.P).all()
@@ -61,10 +71,12 @@ def test_conductance_preserves_precipitation_choices_and_weight(tmp_path):
     with Dataset(output) as nc:
         assert nc.product_type == "conductance"
         assert nc.precipitation_method == "zhang_paxton"
-        assert nc.proton_method == "SI12"
+        assert nc.proton_flux_source == "SI12"
+        assert nc.proton_energy_model == "hardy"
         assert nc.conductance_model == "robinson"
         assert set(nc.variables) == {
-            "time", "Kp", "Kp_interval_start", "ssalon", "E0", "dE0", "Fe",
+            "time", "Kp", "Kp_interval_start", "ssalon", "Ep_model", "Ep",
+            "dEp", "Ep_clipping_flag", "Fp", "dFp", "E0", "dE0", "Fe",
             "dFe", "varE0Fe", "P", "H", "dP", "dH", "w",
         }
         np.testing.assert_allclose(nc.variables["w"][:], 0.7)
