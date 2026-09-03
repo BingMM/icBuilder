@@ -3,6 +3,7 @@
 from .preimage import PreImage
 from .binnedimage import BinnedImage
 from .precipitationimage import PrecipitationImage
+from .precipitationdetector import PrecipitationDetector
 from .conductanceimage import ConductanceImage
 from .grids import make_image_grids, make_wic_grid
 from .kp import load_gfz_kp, match_gfz_kp
@@ -14,6 +15,7 @@ __all__ = [
     "PreImage",
     "BinnedImage",
     "PrecipitationImage",
+    "PrecipitationDetector",
     "ConductanceImage",
     "make_image_grids",
     "make_wic_grid",

@@ -73,6 +73,7 @@ def test_binned_geometry_and_los_factor_are_preserved():
         [datetime(2001, 1, 1)],
         correction=None,
         los_correction=True,
+        binning_method="centre",
     )
 
     # Corrected pixels are [10, 10, 15].
@@ -92,6 +93,7 @@ def test_geometry_is_retained_when_los_correction_is_disabled():
         [datetime(2001, 1, 1)],
         correction=None,
         los_correction=False,
+        binning_method="centre",
     )
 
     assert binned.mu[0, 0, 0] == 20.0

@@ -111,7 +111,6 @@ def _old_binning(preimage, grid):
         lat, _, mlt, _ = preimage.get_mcoords(i)
         lon = mlt * 15
         inside = grid.ingrid(lon, lat)
-        result["counts"][i] = grid.count(lon[inside], lat[inside])
         image = preimage.get_img(i)
         weights = preimage.get_dgw(i) * preimage.get_shw(i)
         sza = preimage.get_SZA(i)
@@ -121,15 +120,12 @@ def _old_binning(preimage, grid):
         for jj in range(grid.shape[0]):
             for kk in range(grid.shape[1]):
                 index = (i, jj, kk)
-                if result["counts"][index] < 2:
-                    continue
                 mask = (j == jj) & (k == kk)
                 values = image.flatten()[mask]
                 image_nan = np.isnan(values)
-                if np.sum(~image_nan) < 2:
+                result["counts"][index] = np.sum(~image_nan)
+                if not np.any(~image_nan):
                     continue
-                if np.any(image_nan):
-                    result["counts"][index] -= np.sum(image_nan)
 
                 result["mu"][index] = max(np.nanmedian(values), 0)
                 result["sigma"][index] = np.nanstd(values)
@@ -162,6 +158,7 @@ def test_grouped_binning_is_exactly_equal_to_cell_scanning():
         [datetime(2001, 1, 1), datetime(2001, 1, 1, 0, 1)],
         correction=None,
         los_correction=False,
+        binning_method="centre",
     )
 
     for name, expected in reference.items():
@@ -216,4 +213,3 @@ def test_cached_uncertainty_multipliers_preserve_scalar_result(monkeypatch):
 
     np.testing.assert_array_equal(binned.sigma, expected)
     assert calls == {"t": 3, "chi2": 3}
-

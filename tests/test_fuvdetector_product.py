@@ -1,0 +1,256 @@
+"""Focused tests for the detector-space Product-1 boundary."""
+
+#%% Imports and test helpers
+
+from datetime import datetime, timedelta
+import importlib.util
+from pathlib import Path
+import shutil
+
+import numpy as np
+import pytest
+from netCDF4 import Dataset, num2date
+
+from icbuilder.fuvdetector import FUVDetector, match_wic_times, source_identity
+
+
+SCRIPT = (
+    Path(__file__).parents[1] / "scripts" / "pipeline"
+    / "make_fuv_detector_orbit_files.py"
+)
+SPEC = importlib.util.spec_from_file_location(
+    "make_fuv_detector_orbit_files", SCRIPT
+)
+ORBIT_SCRIPT = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(ORBIT_SCRIPT)
+
+BASE_TIME = datetime(2001, 1, 1)
+
+
+def regular_camera(sensor, size, spacing, times, value):
+    """Make regular geographic detector frames with constant observations."""
+
+    row, column = np.indices((size, size))
+    centre = (size - 1) / 2
+    latitude = 70 + (row - centre) * spacing
+    longitude = (column - centre) * spacing / np.cos(np.deg2rad(70))
+    frame_shape = (len(times), size, size)
+
+    camera = {
+        "sensor": sensor,
+        "source_file": f"{sensor.lower()}.nc",
+        "image_field": "shimg" if sensor == "WIC" else "dgimg",
+        "time": np.asarray(times, dtype=object),
+        "counts": np.full(frame_shape, value, dtype=float),
+        "quality_weight": np.full(frame_shape, 0.8, dtype=float),
+        "glat": np.broadcast_to(latitude, frame_shape).copy(),
+        "glon": np.broadcast_to(longitude, frame_shape).copy(),
+        "sza": np.full(frame_shape, 80.0),
+        "dza": np.full(frame_shape, 20.0),
+        "geometry_valid": np.ones(frame_shape, dtype=bool),
+    }
+    if sensor == "WIC":
+        camera.update({
+            "mlat": np.broadcast_to(latitude, frame_shape).copy(),
+            "mlon": np.broadcast_to(longitude, frame_shape).copy(),
+            "mlt": np.mod(
+                np.broadcast_to(longitude / 15, frame_shape), 24
+            ).copy(),
+            "ssalon": np.full(len(times), 10.0),
+        })
+    return camera
+
+
+#%% WIC-led matching
+
+def test_wic_led_matching_is_nearest_deterministic_and_without_reuse():
+    wic_times = [BASE_TIME, BASE_TIME + timedelta(seconds=1)]
+    sensor_times = [
+        BASE_TIME - timedelta(seconds=1),
+        BASE_TIME + timedelta(seconds=1),
+    ]
+
+    # The first WIC frame has an equal-distance tie and selects the earlier
+    # sensor frame. The second frame then uses the remaining exact match.
+    np.testing.assert_array_equal(
+        match_wic_times(wic_times, sensor_times), [0, 1]
+    )
+
+    np.testing.assert_array_equal(
+        match_wic_times(wic_times, [BASE_TIME]), [0, -1]
+    )
+
+
+def test_wic_led_matching_keeps_unmatched_wic_frames():
+    wic_times = [BASE_TIME, BASE_TIME + timedelta(seconds=120)]
+    sensor_times = [BASE_TIME + timedelta(seconds=3)]
+
+    np.testing.assert_array_equal(
+        match_wic_times(wic_times, sensor_times), [-1, -1]
+    )
+
+    np.testing.assert_array_equal(
+        match_wic_times(wic_times[:1], [BASE_TIME + timedelta(seconds=2)]),
+        [0],
+    )
+
+
+def test_wic_led_matching_rejects_missing_times_and_declares_order_priority():
+    with pytest.raises(ValueError, match="missing values"):
+        match_wic_times([BASE_TIME], [np.datetime64("NaT")])
+
+    # Stored WIC order has priority when one SI frame lies within tolerance of
+    # two WIC frames. This is explicit experimental behavior, not a global fit.
+    np.testing.assert_array_equal(
+        match_wic_times(
+            [BASE_TIME, BASE_TIME + timedelta(seconds=1.5)],
+            [BASE_TIME + timedelta(seconds=1)],
+        ),
+        [0, -1],
+    )
+
+
+#%% Product construction and serialization
+
+def test_detector_product_coregisters_each_si_channel_independently():
+    wic_times = [BASE_TIME, BASE_TIME + timedelta(seconds=120)]
+    wic = regular_camera("WIC", 16, 0.05, wic_times, 10.0)
+    si12 = regular_camera(
+        "SI12", 8, 0.10, [BASE_TIME + timedelta(seconds=1)], 5.0
+    )
+    si13 = regular_camera(
+        "SI13", 8, 0.10,
+        [BASE_TIME + timedelta(seconds=121)], 7.0,
+    )
+
+    product = FUVDetector(wic, si12, si13, software_version="test")
+
+    assert product.shape == (2, 16, 16)
+    np.testing.assert_array_equal(product.si12_source_index, [0, -1])
+    np.testing.assert_array_equal(product.si13_source_index, [-1, 0])
+    np.testing.assert_allclose(product.si12_counts[0], 5.0)
+    np.testing.assert_allclose(product.si13_counts[1], 7.0)
+    assert np.isnan(product.si12_counts[1]).all()
+    assert np.isnan(product.si13_counts[0]).all()
+    assert np.all(product.si12_coverage[0] >= 0.9)
+    assert np.all(product.si13_coverage[1] >= 0.9)
+    assert np.all(product.si12_source_count[0] >= 1)
+    assert np.all(product.si13_source_count[1] >= 1)
+
+
+def test_detector_product_netcdf_is_self_describing_and_restart_safe(tmp_path):
+    wic_file = tmp_path / "wic.nc"
+    si12_file = tmp_path / "si12.nc"
+    wic_file.write_bytes(b"wic source")
+    si12_file.write_bytes(b"si12 source")
+
+    wic_times = [BASE_TIME, BASE_TIME + timedelta(seconds=120)]
+    wic = regular_camera("WIC", 16, 0.05, wic_times, 10.0)
+    si12 = regular_camera(
+        "SI12", 8, 0.10, [BASE_TIME + timedelta(seconds=1)], 5.0
+    )
+    wic.update(source_identity(wic_file))
+    si12.update(source_identity(si12_file))
+    product = FUVDetector(wic, si12, software_version="test")
+    source_files = {
+        "wic": wic_file,
+        "si12": si12_file,
+        "si13": None,
+    }
+    output = tmp_path / "or_0001.nc"
+
+    ORBIT_SCRIPT.save_fuv_detector_file(product, output, source_files)
+
+    assert ORBIT_SCRIPT.fuv_detector_file_status(
+        output, "current_fuvpy_v1", source_files
+    ) == "complete"
+    assert ORBIT_SCRIPT.fuv_detector_file_status(
+        output, "different_preprocessing", source_files
+    ) == "mismatch"
+    assert not Path(str(output) + ".partial").exists()
+
+    with Dataset(output) as nc:
+        assert nc.product_type == "fuv_detector"
+        assert nc.representation == "detector"
+        assert nc.schema_version == 1
+        assert nc.preprocessing_label == "current_fuvpy_v1"
+        assert nc.wic_image_field == "shimg"
+        assert nc.si12_image_field == "dgimg"
+        assert nc.si13_image_field == "dgimg"
+        assert "not available" in nc.detector_noise_model
+        assert nc.coregistration_overlap_operator_stored == 0
+        assert "Kp" not in nc.variables
+        for name in ("dE0", "dFe", "dP", "dH", "wic_uncertainty"):
+            assert name not in nc.variables
+
+        np.testing.assert_array_equal(nc["wic_source_index"][:], [0, 1])
+        np.testing.assert_array_equal(nc["si12_source_index"][:], [0, -1])
+        np.testing.assert_array_equal(nc["si13_source_index"][:], [-1, -1])
+        np.testing.assert_allclose(nc["si12_counts"][0], 5.0)
+        assert np.isnan(nc["si12_counts"][1]).all()
+        assert np.ma.getmaskarray(nc["si13_source_time"][:]).all()
+
+        decoded = num2date(
+            nc["time"][:], nc["time"].units, nc["time"].calendar,
+            only_use_cftime_datetimes=False,
+        )
+        assert decoded.tolist() == wic_times
+
+    documentation_edit = tmp_path / "documentation_edit.nc"
+    shutil.copy2(output, documentation_edit)
+    with Dataset(documentation_edit, "r+") as nc:
+        nc.time_match_rule = "Clearer documentation of the same calculation."
+        nc.quality_weight_method = "Clearer quality-weight documentation."
+        nc.detector_noise_model = "Clearer detector-noise documentation."
+    assert ORBIT_SCRIPT.fuv_detector_file_status(
+        documentation_edit, "current_fuvpy_v1", source_files
+    ) == "complete"
+
+    missing_diagnostic = tmp_path / "missing_diagnostic.nc"
+    shutil.copy2(output, missing_diagnostic)
+    with Dataset(missing_diagnostic, "r+") as nc:
+        nc.renameVariable(
+            "si12_coreg_coverage_maximum", "removed_coverage_maximum"
+        )
+    assert ORBIT_SCRIPT.fuv_detector_file_status(
+        missing_diagnostic, "current_fuvpy_v1", source_files
+    ) == "invalid"
+
+    changed_sources = source_files | {"si12": tmp_path / "different_si12.nc"}
+    assert ORBIT_SCRIPT.fuv_detector_file_status(
+        output, "current_fuvpy_v1", changed_sources
+    ) == "mismatch"
+
+
+def test_product_status_rejects_missing_required_field(tmp_path):
+    path = tmp_path / "broken.nc"
+    source_files = {"wic": Path("wic.nc"), "si12": None, "si13": None}
+    with Dataset(path, "w") as nc:
+        nc.product_type = "fuv_detector"
+        nc.representation = "detector"
+        nc.schema_version = 1
+        nc.preprocessing_label = "current_fuvpy_v1"
+        nc.time_match_tolerance_seconds = 2.0
+        for sensor, source in source_files.items():
+            nc.setncattr(f"source_{sensor}", "" if source is None else str(source))
+            nc.setncattr(
+                f"{sensor}_image_field",
+                "shimg" if sensor == "wic" else "dgimg",
+            )
+        nc.createDimension("time", 1)
+        nc.createDimension("row", 2)
+        nc.createDimension("column", 2)
+
+    assert ORBIT_SCRIPT.fuv_detector_file_status(
+        path, "current_fuvpy_v1", source_files
+    ) == "invalid"
+
+
+def test_orbit_script_does_not_allow_a_label_to_overstate_preprocessing():
+    assert ORBIT_SCRIPT.validate_label("current_fuvpy_v1") == "current_fuvpy_v1"
+    with pytest.raises(ValueError, match="explicit preprocessing branch"):
+        ORBIT_SCRIPT.validate_label("historical_fuview")
+
+    wic = regular_camera("WIC", 4, 0.05, [BASE_TIME], 10.0)
+    with pytest.raises(ValueError, match="explicit preprocessing branch"):
+        FUVDetector(wic, preprocessing_label="historical_fuview")
