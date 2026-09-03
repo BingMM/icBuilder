@@ -65,14 +65,26 @@ def make_wic_transform(wic, frame):
 
     transform = {"centre": centre, "east": east, "north": north}
     x, y = plane_coordinates(vectors, transform)
+    projected_valid = valid & np.isfinite(x) & np.isfinite(y)
+    if np.count_nonzero(projected_valid) < 3:
+        raise ValueError(
+            "WIC frame needs at least three pixels on the local projection"
+        )
+
     row, column = np.indices(valid.shape)
-    triangulation = Delaunay(np.column_stack([x[valid], y[valid]]))
+    triangulation = Delaunay(
+        np.column_stack([x[projected_valid], y[projected_valid]])
+    )
     detector_axes = (np.arange(valid.shape[0]), np.arange(valid.shape[1]))
 
     transform.update({
         "shape": valid.shape,
-        "row": LinearNDInterpolator(triangulation, row[valid], fill_value=np.nan),
-        "column": LinearNDInterpolator(triangulation, column[valid], fill_value=np.nan),
+        "row": LinearNDInterpolator(
+            triangulation, row[projected_valid], fill_value=np.nan
+        ),
+        "column": LinearNDInterpolator(
+            triangulation, column[projected_valid], fill_value=np.nan
+        ),
         "vector": [
             RegularGridInterpolator(
                 detector_axes, vectors[..., component],

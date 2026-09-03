@@ -201,15 +201,19 @@ def process_orbit(
     paths = source_paths(
         base, orbit, wic_folder, si12_folder, si13_folder
     )
-    product = FUVDetector.from_files(
-        paths["wic"],
-        paths["si12"],
-        paths["si13"],
-        preprocessing_label=preprocessing_label,
-        software_version=software_version,
-    )
-    output_file = output_directory / f"or_{orbit:04d}.nc"
-    save_fuv_detector_file(product, output_file, paths)
+    try:
+        product = FUVDetector.from_files(
+            paths["wic"],
+            paths["si12"],
+            paths["si13"],
+            preprocessing_label=preprocessing_label,
+            software_version=software_version,
+        )
+        output_file = output_directory / f"or_{orbit:04d}.nc"
+        save_fuv_detector_file(product, output_file, paths)
+    except Exception as error:
+        raise RuntimeError(f"fuv_detector orbit {orbit:04d} failed") from error
+
     return orbit, product.shape[0]
 
 
@@ -290,7 +294,7 @@ def main(argv=None):
         if status != "complete":
             pending.append(int(orbit))
 
-    print(f"fuv_detector/{label}: {len(selected) - len(pending)} complete, "
+    print(f"{args.output_folder}/{label}: {len(selected) - len(pending)} complete, "
           f"{len(pending)} pending")
     if not pending:
         return []
