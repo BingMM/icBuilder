@@ -7,11 +7,13 @@ import hashlib
 import os
 import re
 import subprocess
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 from netCDF4 import Dataset
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from icbuilder.fuvdetector import (
     COREGISTRATION_FLOAT_FIELDS,
@@ -233,12 +235,19 @@ def parse_args(argv=None):
         "--orbit", action="append", type=int,
         help="Process only this orbit; repeat the option for more than one.",
     )
+    parser.add_argument(
+        "--workers", type=int, default=1,
+        help="Number of orbit workers; 1 runs serially (default: 1).",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.workers < 1:
+        raise ValueError("workers must be at least 1")
+
     label = validate_label(args.preprocessing_label)
     base = args.base.expanduser()
     output_directory = base / args.output_folder / label
@@ -286,19 +295,29 @@ def main(argv=None):
     if not pending:
         return []
 
-    results = []
-    for orbit in tqdm(pending, desc="Create detector Product 1 orbits"):
-        results.append(process_orbit(
-            orbit,
-            base,
-            output_directory,
-            label,
-            software_version,
-            args.wic_folder,
-            args.s12_folder,
-            args.s13_folder,
-        ))
-    return results
+    function = partial(
+        process_orbit,
+        base=base,
+        output_directory=output_directory,
+        preprocessing_label=label,
+        software_version=software_version,
+        wic_folder=args.wic_folder,
+        si12_folder=args.s12_folder,
+        si13_folder=args.s13_folder,
+    )
+    if args.workers > 1:
+        return process_map(
+            function,
+            pending,
+            max_workers=args.workers,
+            chunksize=1,
+            desc="Create detector Product 1 orbits",
+        )
+
+    return [
+        function(orbit)
+        for orbit in tqdm(pending, desc="Create detector Product 1 orbits")
+    ]
 
 
 if __name__ == "__main__":
